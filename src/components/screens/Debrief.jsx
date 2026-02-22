@@ -28,16 +28,9 @@ export default function Debrief() {
             setIsSubmitting(true);
 
             try {
-                await api.post(`/game/${state.sessionId}/complete`, {
-                    waveReached: state.wave,
-                    finalHp: state.assetHp,
-                    killRatio: ratio / 100, // normalized to 0-1
-                    totalIntercepted: state.kills,
-                    totalBreached: state.breaches,
-                    totalThreatsSpawned: totalSpawned,
-                    systemsExpendedCount: state.systems.filter(s => s.status === 'WINCHESTER').length
-                });
-                setSubmissionStatus('UPLINK SECURE // LOG FILED WITH COMMAND _');
+                // Mock submission for frontend-only
+                await new Promise(resolve => setTimeout(resolve, 800));
+                setSubmissionStatus('LOCAL UPLINK SECURE // LOG FILED (OFFLINE) _');
             } catch (err) {
                 console.error("Failed to submit game stats:", err);
                 setSubmissionStatus('UPLINK FAILED // LOGGED TO LOCAL BLACK BOX _');

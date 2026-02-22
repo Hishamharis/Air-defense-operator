@@ -13,8 +13,8 @@ export const AuthProvider = ({ children }) => {
         if (token) {
             api.setToken(token);
             try {
-                const data = await api.get('/auth/me');
-                setUser(data.user);
+                const mockUser = { id: 1, username: 'COMMANDER', email: 'cmd@local' };
+                setUser(mockUser);
             } catch (err) {
                 console.error('Failed to initialize auth:', err);
                 api.setToken(null);
@@ -31,9 +31,9 @@ export const AuthProvider = ({ children }) => {
     const login = async (identifier, password) => {
         try {
             setError(null);
-            const data = await api.post('/auth/login', { identifier, password });
-            api.setToken(data.accessToken);
-            setUser(data.user);
+            const mockUser = { id: 'local_' + Date.now(), username: identifier, role: 'USER' };
+            api.setToken('mock_token_123');
+            setUser(mockUser);
             return true;
         } catch (err) {
             setError(err.message || 'Login failed');
@@ -44,9 +44,9 @@ export const AuthProvider = ({ children }) => {
     const register = async (username, email, password, confirmPassword) => {
         try {
             setError(null);
-            const data = await api.post('/auth/register', { username, email, password, confirmPassword });
-            api.setToken(data.accessToken);
-            setUser(data.user);
+            const mockUser = { id: 'local_' + Date.now(), username, role: 'USER' };
+            api.setToken('mock_token_123');
+            setUser(mockUser);
             return true;
         } catch (err) {
             setError(err.message || 'Registration failed');
@@ -56,7 +56,8 @@ export const AuthProvider = ({ children }) => {
 
     const logout = async () => {
         try {
-            await api.post('/auth/logout');
+            // mock logout
+            console.log("Mock logout");
         } catch (e) {
             console.warn('Logout API call failed, still clearing local state', e);
         } finally {

@@ -13,8 +13,27 @@ export default function LeaderboardScreen() {
     const fetchLeaderboard = async () => {
         setIsLoading(true);
         try {
-            const data = await api.get(`/leaderboard?period=${period}`);
-            setLeaderboard(data.leaderboard || []);
+            // Mock backend leaderboard response
+            await new Promise(resolve => setTimeout(resolve, 600)); // fake network delay
+
+            let mockData = [];
+            if (period === 'ALLTIME') {
+                mockData = [
+                    { username: 'GHOST_RIDER', score: 345200, wavesReached: 28 },
+                    { username: 'IRON_DOME', score: 312050, wavesReached: 26 },
+                    { username: 'VIPER_ACTUAL', score: 289400, wavesReached: 24 },
+                    { username: 'SKY_SHIELD', score: 245100, wavesReached: 21 },
+                    { username: 'DELTA_9', score: 198000, wavesReached: 18 }
+                ];
+            } else {
+                mockData = [
+                    { username: 'VIPER_ACTUAL', score: 125400, wavesReached: 14 },
+                    { username: 'GHOST_RIDER', score: 112000, wavesReached: 12 },
+                    { username: 'NOVA_STRIKE', score: 95000, wavesReached: 10 }
+                ];
+            }
+
+            setLeaderboard(mockData);
         } catch (err) {
             console.error('Failed to load leaderboard', err);
         } finally {
@@ -55,8 +74,8 @@ export default function LeaderboardScreen() {
                                 key={p}
                                 onClick={() => setPeriod(p)}
                                 className={`px-4 py-2 border flex items-center gap-2 transition-colors duration-200 ${period === p
-                                        ? 'bg-alert/20 border-alert text-alert shadow-[0_0_10px_rgba(207,174,23,0.3)]'
-                                        : 'bg-black/50 border-primary/20 text-secondary hover:border-primary/50'
+                                    ? 'bg-alert/20 border-alert text-alert shadow-[0_0_10px_rgba(207,174,23,0.3)]'
+                                    : 'bg-black/50 border-primary/20 text-secondary hover:border-primary/50'
                                     }`}
                             >
                                 {p}

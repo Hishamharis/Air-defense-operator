@@ -69,12 +69,10 @@ export default function DifficultySelect() {
         const selectedObj = DIFFICULTIES[selected];
 
         try {
-            const data = await api.post('/game', {
-                faction: state.faction?.id || 'US',
-                difficulty: selectedObj.id
-            });
+            // Bypass backend for frontend-only deployment
+            const mockSessionId = 'frontend_session_' + Date.now();
 
-            dispatch({ type: 'SET_SESSION_ID', payload: data.session.id });
+            dispatch({ type: 'SET_SESSION_ID', payload: mockSessionId });
             dispatch({ type: ACTIONS.SELECT_DIFFICULTY, payload: selectedObj });
             dispatch({ type: ACTIONS.START_GAME, payload: { systems: state.faction.flatSystems, startHP: selectedObj.startHP } });
             audio.playRadarPing();
