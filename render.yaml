@@ -1,19 +1,4 @@
-databases:
-  # Base PostgreSQL Database
-  - name: airdefense-db
-    databaseName: airdefense
-    user: airdefense
-    plan: free
-    postgresMajorVersion: "15"
-
 services:
-
-  # Redis Cache & PubSub
-  - type: redis
-    name: airdefense-redis
-    plan: free
-    ipAllowList: [] # Allow all internal
-
   # Node.js Backend Server
   - type: web
     name: airdefense-server
@@ -26,14 +11,9 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        fromDatabase:
-          name: airdefense-db
-          property: connectionString
+        sync: false # Connect manually using your existing Postgres
       - key: REDIS_URL
-        fromService:
-          type: redis
-          name: airdefense-redis
-          property: connectionString
+        sync: false # Connect manually using your existing Redis
       - key: JWT_SECRET
         generateValue: true
       - key: REFRESH_SECRET
