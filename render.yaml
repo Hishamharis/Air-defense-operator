@@ -1,9 +1,12 @@
-services:
+databases:
   # Base PostgreSQL Database
-  - type: postgres
-    name: airdefense-db
+  - name: airdefense-db
+    databaseName: airdefense
+    user: airdefense
     plan: free
     postgresMajorVersion: "15"
+
+services:
 
   # Redis Cache & PubSub
   - type: redis
