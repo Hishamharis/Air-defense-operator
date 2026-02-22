@@ -1,9 +1,9 @@
 services:
   # Base PostgreSQL Database
-  - type: pgo
+  - type: postgres
     name: airdefense-db
     plan: free
-    postgresMajorVersion: 15
+    postgresMajorVersion: "15"
 
   # Redis Cache & PubSub
   - type: redis
