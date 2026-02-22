@@ -1,11 +1,3 @@
-databases:
-  # Base PostgreSQL Database
-  - name: airdefense-db
-    databaseName: airdefense
-    user: airdefense
-    plan: free
-    postgresMajorVersion: "15"
-
 services:
 
   # Redis Cache & PubSub
@@ -26,9 +18,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        fromDatabase:
-          name: airdefense-db
-          property: connectionString
+        sync: false # Requires manual entry in the dashboard!
       - key: REDIS_URL
         fromService:
           type: redis
