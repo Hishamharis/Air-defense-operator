@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  command-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - command-server
+    restart: unless-stopped
+
+  command-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=airdefense
+      - DB_PASSWORD=airdefense_secure_pass
+      - DB_NAME=airdefense_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=super_secret_jwt_key_change_me_in_prod
+      - REFRESH_SECRET=super_secret_refresh_key_change_me_in_prod
+      - CLIENT_URL=http://localhost
+      - CORS_ORIGIN=http://localhost
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=airdefense
+      - POSTGRES_PASSWORD=airdefense_secure_pass
+      - POSTGRES_DB=airdefense_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
