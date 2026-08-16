@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SENTINEL — Engagement Control Station</title>
+</head>
+<body>
+  <header id="topbar">
+    <div class="tb-left">
+      <span class="brand">SENTINEL</span>
+      <span class="sub">ENGAGEMENT CONTROL STATION</span>
+      <span class="mission" id="mission-name">SCOPE TRIAL 01</span>
+    </div>
+    <div class="tb-center">
+      <span class="zulu" id="zulu">02:14:00Z</span>
+    </div>
+    <div class="tb-right">
+      <span class="pill pill-amber">DEFCON 3</span>
+      <span class="pill pill-blue">WEAPONS TIGHT</span>
+      <span class="pill pill-green">EMCON RADIATE</span>
+      <span class="tctrl">
+        <button id="btn-pause" title="Space">❚❚</button>
+        <button id="btn-1x" class="active" title="1">1×</button>
+        <button id="btn-4x" title="2">4×</button>
+        <button id="btn-16x" title="3">16×</button>
+      </span>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel" id="scope-panel">
+      <div class="panel-head">
+        <span>SEARCH RADAR — PPI</span>
+        <span class="ph-right" id="scope-meta">RNG 100 KM · 15 RPM</span>
+      </div>
+      <div class="panel-body scope-body">
+        <canvas id="ppi"></canvas>
+      </div>
+    </section>
+
+    <aside id="right-col">
+      <section class="panel" id="track-panel">
+        <div class="panel-head"><span>TRACK TABLE</span><span class="ph-right" id="track-count">0 TRK</span></div>
+        <div class="panel-body table-body">
+          <table id="track-table">
+            <thead>
+              <tr><th>TN</th><th>CLASS</th><th>ID</th><th>SPD</th><th>ALT</th><th>BRG</th><th>RNG</th></tr>
+            </thead>
+            <tbody id="track-tbody"></tbody>
+          </table>
+          <div class="empty-hint" id="track-empty">NO TRACKS — SCOPE CLEAR</div>
+        </div>
+      </section>
+
+      <section class="panel" id="detail-panel">
+        <div class="panel-head"><span>SELECTED TRACK</span></div>
+        <div class="panel-body detail-body" id="detail-body">
+          <div class="empty-hint">NO TRACK SELECTED</div>
+        </div>
+      </section>
+
+      <section class="panel" id="fire-panel">
+        <div class="panel-head"><span>FIRE UNITS</span></div>
+        <div class="panel-body fire-body">
+          <div class="fu fu-off">LNCHR 1<br><small>OFFLINE</small></div>
+          <div class="fu fu-off">LNCHR 2<br><small>OFFLINE</small></div>
+          <div class="fu fu-off">LNCHR 3<br><small>OFFLINE</small></div>
+          <div class="fu fu-off">LNCHR 4<br><small>OFFLINE</small></div>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="panel" id="log-panel">
+    <div class="panel-head"><span>SYSTEM LOG</span><span class="ph-right">LNCHR INTERFACE — M4</span></div>
+    <div class="panel-body log-body" id="log-body"></div>
+  </footer>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
