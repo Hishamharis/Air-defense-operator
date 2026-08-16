@@ -5,6 +5,7 @@ export const MISSION = {
   /** mission starts at 02:14:00Z */
   startSeconds: 2 * 3600 + 14 * 60,
   rangeKm: 100,
+  radarHeightM: 20,
 };
 
 export const ENTITIES: EntityDef[] = [

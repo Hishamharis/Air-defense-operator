@@ -18,7 +18,7 @@
     <div class="tb-right">
       <span class="pill pill-amber">DEFCON 3</span>
       <span class="pill pill-blue">WEAPONS TIGHT</span>
-      <span class="pill pill-green">EMCON RADIATE</span>
+      <span class="pill pill-green" id="pill-emcon">EMCON RADIATE</span>
       <span class="tctrl">
         <button id="btn-pause" title="Space">❚❚</button>
         <button id="btn-1x" class="active" title="1">1×</button>
@@ -40,12 +40,21 @@
     </section>
 
     <aside id="right-col">
+      <section class="panel" id="emcon-panel">
+        <div class="panel-head"><span>EMCON — RADAR CONTROL</span><span class="ph-right" id="emcon-status">SURVEILLANCE</span></div>
+        <div class="panel-body emcon-body">
+          <button id="emc-surv" class="emc active">SURVEILLANCE</button>
+          <button id="emc-sector" class="emc">SECTOR</button>
+          <button id="emc-silent" class="emc danger">SILENT</button>
+        </div>
+      </section>
+
       <section class="panel" id="track-panel">
         <div class="panel-head"><span>TRACK TABLE</span><span class="ph-right" id="track-count">0 TRK</span></div>
         <div class="panel-body table-body">
           <table id="track-table">
             <thead>
-              <tr><th>TN</th><th>CLASS</th><th>ID</th><th>SPD</th><th>ALT</th><th>BRG</th><th>RNG</th></tr>
+              <tr><th>TN</th><th>CLASS</th><th>ID</th><th>SPD</th><th>ALT</th><th>QUAL</th><th>RNG</th></tr>
             </thead>
             <tbody id="track-tbody"></tbody>
           </table>

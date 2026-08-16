@@ -45,6 +45,7 @@ export class PPI {
   selectedTn: number | null = null;
   showTruth = false;
   onSelect: ((tn: number | null) => void) | null = null;
+  onAim: ((bearing: number) => void) | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -152,32 +153,6 @@ export class PPI {
     // persistence layer
     ctx.drawImage(this.persist, 0, 0, this.w, this.h);
 
-    // sweep wedge
-    const brg = this.world.sweepAngle;
-    const a = PPI.bearingToCanvas(brg);
-    const wedge = 26 * Math.PI / 180;
-    const grad = ctx.createConicGradient
-      ? ctx.createConicGradient(a - wedge, this.cx, this.cy)
-      : null;
-    if (grad) {
-      grad.addColorStop(0, `rgba(${PAL.sweep}, 0)`);
-      grad.addColorStop(0.9, `rgba(${PAL.sweep}, 0.10)`);
-      grad.addColorStop(1, `rgba(${PAL.sweep}, 0.22)`);
-      ctx.beginPath();
-      ctx.moveTo(this.cx, this.cy);
-      ctx.arc(this.cx, this.cy, this.radius + 4, a - wedge, a);
-      ctx.closePath();
-      ctx.fillStyle = grad;
-      ctx.fill();
-    }
-    // leading edge
-    ctx.strokeStyle = `rgba(${PAL.sweep}, 0.65)`;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(this.cx, this.cy);
-    ctx.lineTo(this.cx + Math.cos(a) * (this.radius + 4), this.cy + Math.sin(a) * (this.radius + 4));
-    ctx.stroke();
-
     ctx.restore();
 
     // outer rim + bearing ticks + labels
@@ -215,6 +190,33 @@ export class PPI {
       ctx.fillText(String(i * 20), this.cx + (this.radius * i) / 5 + 4, this.cy - 6);
     }
 
+    ctx.restore();
+
+    // weather cells (outside clip so the label rim stays clean, blob inside)
+    for (const cell of this.world.wxCells) {
+      const [sx, sy] = this.toScreen(cell.x, cell.y);
+      const r = (cell.radiusM / this.rangeM) * this.radius;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(this.cx, this.cy, this.radius, 0, Math.PI * 2);
+      ctx.clip();
+      const g = ctx.createRadialGradient(sx, sy, r * 0.2, sx, sy, r);
+      g.addColorStop(0, 'rgba(90, 110, 130, 0.14)');
+      g.addColorStop(1, 'rgba(90, 110, 130, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // sweep (hidden while EMCON silent or warming)
+    if (this.world.radar.radiating) this.drawSweep(ctx);
+    else if (this.world.radar.mode === 'SILENT' || this.world.radar.warming) this.drawSilentMark(ctx);
+
+    // sector focus overlay
+    if (this.world.radar.mode === 'SECTOR') this.drawSectorArc(ctx);
+
     // truth overlay (dev / debrief camera)
     if (this.showTruth) this.drawTruth(ctx);
 
@@ -235,14 +237,109 @@ export class PPI {
     ctx.stroke();
   }
 
+  private drawSweep(ctx: CanvasRenderingContext2D): void {
+    const brg = this.world.sweepAngle;
+    const a = PPI.bearingToCanvas(brg);
+    const wedge = 26 * Math.PI / 180;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(this.cx, this.cy, this.radius + 4, 0, Math.PI * 2);
+    ctx.clip();
+
+    const grad = ctx.createConicGradient
+      ? ctx.createConicGradient(a - wedge, this.cx, this.cy)
+      : null;
+    if (grad) {
+      grad.addColorStop(0, `rgba(${PAL.sweep}, 0)`);
+      grad.addColorStop(0.9, `rgba(${PAL.sweep}, 0.10)`);
+      grad.addColorStop(1, `rgba(${PAL.sweep}, 0.22)`);
+      ctx.beginPath();
+      ctx.moveTo(this.cx, this.cy);
+      ctx.arc(this.cx, this.cy, this.radius + 4, a - wedge, a);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+    ctx.strokeStyle = `rgba(${PAL.sweep}, 0.65)`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(this.cx, this.cy);
+    ctx.lineTo(this.cx + Math.cos(a) * (this.radius + 4), this.cy + Math.sin(a) * (this.radius + 4));
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  private drawSilentMark(ctx: CanvasRenderingContext2D): void {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(168, 67, 63, 0.55)';
+    ctx.lineWidth = 1.5;
+    const m = 14;
+    ctx.beginPath();
+    ctx.moveTo(this.cx - m, this.cy - m);
+    ctx.lineTo(this.cx + m, this.cy + m);
+    ctx.moveTo(this.cx + m, this.cy - m);
+    ctx.lineTo(this.cx - m, this.cy + m);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(168, 67, 63, 0.75)';
+    ctx.font = '10px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText(
+      this.world.radar.warming ? 'RADAR WARM-UP' : 'EMCON SILENT — NOT RADIATING',
+      this.cx,
+      this.cy + 34,
+    );
+    ctx.restore();
+  }
+
+  private drawSectorArc(ctx: CanvasRenderingContext2D): void {
+    const r = this.world.radar;
+    const half = (r.sectorHalfWidthDeg * Math.PI) / 180;
+    const center = PPI.bearingToCanvas(r.sectorBearing);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(this.cx, this.cy, this.radius, 0, Math.PI * 2);
+    ctx.clip();
+
+    // faint wedge fill
+    ctx.fillStyle = 'rgba(201, 179, 126, 0.05)';
+    ctx.beginPath();
+    ctx.moveTo(this.cx, this.cy);
+    ctx.arc(this.cx, this.cy, this.radius, center - half, center + half);
+    ctx.closePath();
+    ctx.fill();
+
+    // dashed arc near the rim
+    ctx.strokeStyle = 'rgba(201, 179, 126, 0.55)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.arc(this.cx, this.cy, this.radius - 3, center - half, center + half);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // bearing label just outside the rim
+    ctx.fillStyle = 'rgba(201, 179, 126, 0.8)';
+    ctx.font = '10px system-ui';
+    ctx.textAlign = 'center';
+    const lr = this.radius - 16;
+    ctx.fillText(
+      `${String(Math.round(r.sectorBearing)).padStart(3, '0')}°`,
+      this.cx + Math.cos(center) * lr,
+      this.cy + Math.sin(center) * lr,
+    );
+    ctx.restore();
+  }
+
   private drawSymbol(ctx: CanvasRenderingContext2D, trk: Track): void {
+    // unconfirmed plots stay phosphor blips only — the computer draws no symbol yet
+    if (trk.state === 'PLOT') return;
     const e = this.world.entityById(trk.entityId);
     if (!e) return;
-    const [sx, sy] = this.toScreen(trk.blip.x, trk.blip.y);
+    const [sx, sy] = this.toScreen(trk.est.x, trk.est.y);
     if (Math.hypot(sx - this.cx, sy - this.cy) > this.radius) return;
 
-    // M1: friendlies arrive pre-identified (as if datalink); everything else unknown.
-    // M3 replaces this with the real IFF/identification gameplay.
+    // M2: friendlies arrive pre-identified (datalink); everything else unknown.
+    // M3 replaces this with real IFF/identification gameplay.
     const color = e.def.friendly ? PAL.friendly : PAL.unknown;
 
     ctx.save();
@@ -250,24 +347,26 @@ export class PPI {
     ctx.fillStyle = color;
     ctx.lineWidth = 1.4;
 
-    // velocity leader from last blip along current known heading
-    const lead = 10 + (trk.blip.brightness * 4);
-    const ha = ((e.headingDeg - 90) * Math.PI) / 180;
-    ctx.globalAlpha = 0.55;
+    // velocity leader along the TWS heading estimate; dashed while coasting
+    const lead = 10 + Math.min(18, (trk.est.speedMs / 25) * 4);
+    const ha = ((trk.est.headingDeg - 90) * Math.PI) / 180;
+    ctx.globalAlpha = trk.state === 'COAST' ? 0.45 : 0.55;
     ctx.beginPath();
     ctx.moveTo(sx, sy);
     ctx.lineTo(sx + Math.cos(ha) * lead, sy + Math.sin(ha) * lead);
     ctx.stroke();
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = trk.state === 'COAST' ? 0.6 : 1;
+
+    if (trk.state === 'COAST') ctx.setLineDash([3, 2]);
 
     if (e.def.friendly) {
       // friendly: circle (air track "dome" flavor)
       ctx.beginPath();
       ctx.arc(sx, sy, 6, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.globalAlpha = 0.18;
+      ctx.globalAlpha = trk.state === 'COAST' ? 0.1 : 0.18;
       ctx.fill();
-      ctx.globalAlpha = 1;
+      ctx.globalAlpha = trk.state === 'COAST' ? 0.6 : 1;
     } else {
       // unknown: quatrefoil approximation (4 petal arcs)
       for (let k = 0; k < 4; k++) {
@@ -279,6 +378,7 @@ export class PPI {
         ctx.stroke();
       }
     }
+    ctx.setLineDash([]);
 
     // selected highlight
     if (this.selectedTn === trk.tn) {
@@ -329,10 +429,23 @@ export class PPI {
     const rect = this.canvas.getBoundingClientRect();
     const px = ev.clientX - rect.left;
     const py = ev.clientY - rect.top;
+    const [wx, wy] = [
+      (px - this.cx) / (this.radius / this.rangeM),
+      -(py - this.cy) / (this.radius / this.rangeM),
+    ];
+
+    // in SECTOR mode the scope click aims the focused arc instead of selecting
+    if (this.world.radar.mode === 'SECTOR') {
+      const brg = Math.round((Math.atan2(wx, wy) * 180) / Math.PI);
+      if (this.onAim) this.onAim((brg + 360) % 360);
+      return;
+    }
+
     let best: number | null = null;
     let bestD = 20;
     for (const trk of this.world.tracks.values()) {
-      const [sx, sy] = this.toScreen(trk.blip.x, trk.blip.y);
+      if (trk.state === 'PLOT') continue;
+      const [sx, sy] = this.toScreen(trk.est.x, trk.est.y);
       const d = Math.hypot(px - sx, py - sy);
       if (d < bestD) {
         bestD = d;
@@ -349,11 +462,11 @@ export class PPI {
     this.selectedTn = tn;
   }
 
-  /** bearing/range readout of a track's last blip */
+  /** bearing/range readout of a track's current estimate */
   brgRng(trk: Track): { brg: number; rngKm: number } {
     return {
-      brg: Math.round(bearingDeg(trk.blip.x, trk.blip.y)),
-      rngKm: Math.round(Math.hypot(trk.blip.x, trk.blip.y) / 1000),
+      brg: Math.round(bearingDeg(trk.est.x, trk.est.y)),
+      rngKm: Math.round(Math.hypot(trk.est.x, trk.est.y) / 1000),
     };
   }
 }

@@ -112,7 +112,7 @@ main {
 
 #right-col {
   display: grid;
-  grid-template-rows: 1fr auto auto;
+  grid-template-rows: auto 1fr auto auto;
   gap: 8px;
   min-height: 0;
 }
@@ -232,6 +232,42 @@ main {
   font-family: inherit;
   cursor: not-allowed;
 }
+
+#btn-drop {
+  color: var(--amber);
+  border-color: #4d4633;
+  cursor: pointer;
+}
+#btn-drop:hover { background: #26241f; color: var(--accent); }
+
+/* ---------- EMCON ---------- */
+
+.emcon-body { display: flex; gap: 6px; padding: 8px 12px; }
+
+.emc {
+  flex: 1;
+  padding: 8px 0;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  color: var(--dim);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  font-family: inherit;
+  cursor: pointer;
+}
+.emc:hover { color: var(--text); border-color: #464b53; }
+.emc.active { color: var(--accent); border-color: #4d4633; background: #23252a; }
+.emc.danger.active { color: #c46a66; border-color: #5a3230; }
+
+.pill-red { color: #c46a66 !important; border-color: #5a3230 !important; }
+
+/* ---------- track quality ---------- */
+
+.q-plot { color: var(--amber); }
+.q-coast { color: #c46a66; }
+.q-good { color: #8ab48a; }
+
+#track-table tbody tr.row-dim td { opacity: 0.55; }
 
 /* ---------- fire units ---------- */
 

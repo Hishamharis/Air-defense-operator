@@ -1,4 +1,12 @@
-export type EntityClass = 'FIGHTER' | 'BOMBER' | 'AIRLINER' | 'CRUISE' | 'DRONE' | 'HELO';
+export type EntityClass =
+  | 'FIGHTER'
+  | 'BOMBER'
+  | 'AIRLINER'
+  | 'CRUISE'
+  | 'DRONE'
+  | 'HELO'
+  | 'BIRD'
+  | 'CLUTTER';
 
 /** A scripted leg: at world time atT the entity turns to headingDeg (and changes speed if given). */
 export interface Leg {
@@ -20,6 +28,8 @@ export interface EntityDef {
   spawnT: number;
   friendly: boolean;
   legs?: Leg[];
+  /** short-lived clutter return (weather false plot): entity removed after this many seconds */
+  ttlS?: number;
 }
 
 export interface Entity {
@@ -42,13 +52,37 @@ export interface Blip {
   t: number;
 }
 
-/** Player-side representation of an entity, created on first radar paint. */
+export type TrackState = 'PLOT' | 'TRACKED' | 'COAST';
+
+/** Player-side representation of an entity: created on first radar paint,
+ *  dead-reckoned between sweeps, coasting through misses, dropped when faded. */
 export interface Track {
   tn: number;
   entityId: number;
   firstPaintT: number;
   lastPaintT: number;
+  /** last actual radar return */
   blip: Blip;
+  /** TWS computer estimate — smoothed position/velocity, extrapolated between paints */
+  est: {
+    x: number;
+    y: number;
+    altM: number;
+    vx: number;
+    vy: number;
+    speedMs: number;
+    headingDeg: number;
+  };
+  /** heading change across recent paints (deg) — separates wandering helos from drones */
+  headingChurnDeg: number;
+  state: TrackState;
+  paints: number;
+  /** consecutive sweeps since last detection */
+  missed: number;
+  /** sweep serial of last detection (miss accounting) */
+  lastDetectSweep: number;
+  autoClass: string;
+  classConf: 'GOOD' | 'FAIR' | 'POOR';
 }
 
 export const CLASS_RCS: Record<EntityClass, number> = {
@@ -58,9 +92,11 @@ export const CLASS_RCS: Record<EntityClass, number> = {
   CRUISE: 0.1,
   DRONE: 0.15,
   HELO: 2,
+  BIRD: 0.05,
+  CLUTTER: 0.8,
 };
 
-/** M1 placeholder classification: derived from truth class. M2 will derive from kinematics. */
+/** Datalink-derived identity note for friendlies (full IFF arrives in M3). */
 export const CLASS_LABEL: Record<EntityClass, string> = {
   FIGHTER: 'ABT',
   BOMBER: 'ABT',
@@ -68,6 +104,8 @@ export const CLASS_LABEL: Record<EntityClass, string> = {
   CRUISE: 'CRU',
   DRONE: 'UAV',
   HELO: 'HELO',
+  BIRD: 'SLO',
+  CLUTTER: 'SLO',
 };
 
 export const MS_TO_KT = 1.94384;
