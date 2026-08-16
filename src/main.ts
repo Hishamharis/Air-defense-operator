@@ -16,36 +16,132 @@ import {
   ENTITIES as M4_ENTITIES,
   MISSION as M4,
   DIRECTOR as M4_DIRECTOR,
-  FLIGHT_PLANS as M4_PLANS,
 } from './sim/scenarios/m4';
+import { CAMPAIGN, CAMPAIGN_NAME, WatchScenario } from './sim/scenarios/desertstorm';
+import {
+  CampaignState,
+  freshCampaign,
+  loadCampaign,
+  applyWatchResult,
+  clearCampaign,
+} from './sim/campaign';
+import { renderDebrief } from './console/debrief';
+import { ConsoleAudio } from './audio/audio';
 import { PPI } from './console/ppi';
 import { TrackTable } from './console/trackTable';
 
 const DT = 1 / 50; // fixed sim timestep
 const TIME_SCALES = [0, 1, 4, 16];
 
-// ----- scenario select (?sc=m1|m2|m3|m4) -----
-
 const params = new URLSearchParams(location.search);
-const sc = params.get('sc');
-const useM1 = sc === 'm1';
-const useM2 = sc === 'm2';
-const useM3 = sc === 'm3';
-const useM4 = !useM1 && !useM2 && !useM3;
-const ENTITIES = useM1 ? M1_ENTITIES : useM2 ? M2_ENTITIES : useM3 ? M3_ENTITIES : M4_ENTITIES;
-const MISSION = useM1 ? M1 : useM2 ? M2 : useM3 ? M3 : M4;
-const WX_CELLS = useM1 ? [] : useM2 ? M2_WX : useM3 ? M3_WX : [];
-const DIRECTOR_EVENTS = useM3 ? DIRECTOR : useM4 ? M4_DIRECTOR : [];
-const START_WCS = useM3 ? M3.startWcs : useM4 ? M4.startWcs : 'TIGHT';
-const FLIGHT_PLANS_IN_USE: FlightPlan[] = useM3 ? FLIGHT_PLANS : useM4 ? M4_PLANS : [];
+
+// ----- scenario source resolution -----
+
+interface ResolvedWatch {
+  isCampaign: boolean;
+  watchIndex: number; // campaign watch index (0-based), or trial id
+  trial: 'm1' | 'm2' | 'm3' | 'm4' | null;
+  name: string;
+  startSeconds: number;
+  rangeKm: number;
+  radarHeightM: number;
+  endT: number;
+  startWcs: Wcs;
+  briefing: string[];
+  entities: typeof M1_ENTITIES;
+  wxCells: typeof M2_WX;
+  flightPlans: FlightPlan[];
+  directorEvents: import('./sim/director').DirectorEvent[];
+  demo: string | null;
+}
+
+function resolveTrial(id: string): ResolvedWatch {
+  switch (id) {
+    case 'm1':
+      return {
+        isCampaign: false, watchIndex: 0, trial: 'm1', name: M1.name,
+        startSeconds: M1.startSeconds, rangeKm: M1.rangeKm, radarHeightM: M1.radarHeightM,
+        endT: M1.endT, startWcs: 'TIGHT', briefing: [],
+        entities: M1_ENTITIES, wxCells: [], flightPlans: [], directorEvents: [],
+        demo: params.get('demo'),
+      };
+    case 'm2':
+      return {
+        isCampaign: false, watchIndex: 0, trial: 'm2', name: M2.name,
+        startSeconds: M2.startSeconds, rangeKm: M2.rangeKm, radarHeightM: M2.radarHeightM,
+        endT: M2.endT, startWcs: 'TIGHT', briefing: [],
+        entities: M2_ENTITIES, wxCells: M2_WX, flightPlans: [], directorEvents: [],
+        demo: params.get('demo'),
+      };
+    case 'm3':
+      return {
+        isCampaign: false, watchIndex: 0, trial: 'm3', name: M3.name,
+        startSeconds: M3.startSeconds, rangeKm: M3.rangeKm, radarHeightM: M3.radarHeightM,
+        endT: M3.endT, startWcs: M3.startWcs, briefing: [],
+        entities: M3_ENTITIES, wxCells: M3_WX, flightPlans: FLIGHT_PLANS, directorEvents: DIRECTOR,
+        demo: params.get('demo'),
+      };
+    default:
+      return {
+        isCampaign: false, watchIndex: 0, trial: 'm4', name: M4.name,
+        startSeconds: M4.startSeconds, rangeKm: M4.rangeKm, radarHeightM: M4.radarHeightM,
+        endT: M4.endT, startWcs: M4.startWcs, briefing: [],
+        entities: M4_ENTITIES, wxCells: [], flightPlans: M4_DIRECTOR ? [
+          { callsign: 'SWA441', route: 'W→E TRANSIT', altFt: 27000, speedKt: 445, fromS: 0, toS: 600 },
+          { callsign: 'VIPER11', route: 'CAP NORTH-EAST', altFt: 25000, speedKt: 410, fromS: 0, toS: 900 },
+          { callsign: 'VIPER12', route: 'CAP NORTH-EAST', altFt: 25000, speedKt: 400, fromS: 0, toS: 900 },
+        ] : [], directorEvents: M4_DIRECTOR,
+        demo: params.get('demo'),
+      };
+  }
+}
+
+function resolveCampaignWatch(idx: number): ResolvedWatch {
+  const w: WatchScenario = CAMPAIGN[Math.max(0, Math.min(CAMPAIGN.length - 1, idx))];
+  return {
+    isCampaign: true, watchIndex: idx, trial: null, name: w.name,
+    startSeconds: w.startSeconds, rangeKm: w.rangeKm, radarHeightM: w.radarHeightM,
+    endT: w.endT, startWcs: w.startWcs, briefing: w.briefing,
+    entities: w.entities, wxCells: w.wxCells, flightPlans: w.flightPlans, directorEvents: w.director,
+    demo: params.get('demo'),
+  };
+}
+
+// menu mode (no params): boot campaign watch silently, paused, behind the menu
+const scParam = params.get('sc');
+const campaignParam = params.has('campaign');
+const hasWatchParams = scParam !== null || campaignParam || params.has('demo');
+const watchParam = Number(params.get('watch'));
+const devAutostart = params.has('t');
+
+let campaignState: CampaignState | null = campaignParam ? (loadCampaign() ?? freshCampaign()) : null;
+let W: ResolvedWatch;
+
+if (scParam) W = resolveTrial(scParam);
+else if (campaignParam) W = resolveCampaignWatch(Number.isFinite(watchParam) ? Math.max(0, watchParam) : 0);
+else if (params.has('demo')) W = resolveTrial('m4');
+else {
+  const st = loadCampaign();
+  W = resolveCampaignWatch(st ? Math.min(st.watchIndex, CAMPAIGN.length - 1) : 0);
+}
+
+// ----- app phase -----
+
+type Phase = 'menu' | 'briefing' | 'watch' | 'debrief';
+let phase: Phase = hasWatchParams ? (devAutostart ? 'watch' : 'briefing') : 'menu';
+let watchEnded = false;
+
+const overlay = document.getElementById('overlay')!;
+
+// ----- logging -----
 
 interface LogLine {
   t: number;
   text: string;
   cls: string;
 }
-
 const logs: LogLine[] = [];
+const wcsLog: { t: number; wcs: string }[] = [];
 
 function fmtZulu(seconds: number): string {
   const h = Math.floor(seconds / 3600) % 24;
@@ -59,51 +155,68 @@ const logBody = document.getElementById('log-body')!;
 
 function log(text: string, cls = ''): void {
   logs.push({ t: world.time, text, cls });
-  if (logs.length > 80) logs.shift();
+  if (logs.length > 120) logs.shift();
   logBody.innerHTML = logs
     .map(
       l =>
-        `<div class="log-line ${l.cls}"><span class="lt">${fmtZulu(MISSION.startSeconds + l.t)}Z</span>${l.text}</div>`,
+        `<div class="log-line ${l.cls}"><span class="lt">${fmtZulu(W.startSeconds + l.t)}Z</span>${l.text}</div>`,
     )
     .join('');
   logBody.scrollTop = logBody.scrollHeight;
 }
 
-// ----- boot -----
+// ----- audio -----
 
-const radar = new RadarModel(MISSION.rangeKm, MISSION.radarHeightM ?? 20);
+const audio = new ConsoleAudio();
+const btnAudio = document.getElementById('btn-audio')!;
+btnAudio.addEventListener('click', () => {
+  audio.unlock();
+  audio.setEnabled(!audio.enabled);
+  btnAudio.textContent = audio.enabled ? '♪' : '♪̸';
+  btnAudio.classList.toggle('mute', !audio.enabled);
+});
+window.addEventListener('pointerdown', () => audio.unlock(), { once: true });
+
+// ----- boot world -----
+
+const radar = new RadarModel(W.rangeKm, W.radarHeightM);
 
 const wcsPill = document.getElementById('pill-wcs')!;
-
 function refreshWcsPill(wcs: Wcs): void {
   wcsPill.textContent = `WEAPONS ${wcs}`;
   wcsPill.className = `pill ${wcs === 'FREE' ? 'pill-wcs-free' : wcs === 'HOLD' ? 'pill-wcs-hold' : 'pill-blue'}`;
 }
-refreshWcsPill(START_WCS);
+refreshWcsPill(W.startWcs);
+wcsLog.push({ t: 0, wcs: W.startWcs });
 
 function radio(text: string): void {
+  audio.radioSquelch();
   log(`CMD ▸ ${text}`, 'radio');
 }
 
 const director = new Director(
-  DIRECTOR_EVENTS,
-  START_WCS,
+  W.directorEvents,
+  W.startWcs,
   wcs => {
     refreshWcsPill(wcs);
+    wcsLog.push({ t: world.time, wcs });
     log(`WEAPONS CONTROL STATUS: ${wcs}`, 'hl');
   },
   radio,
 );
 
+const tbmAnnounced = new Set<number>();
+
 const world = new World(
-  ENTITIES,
+  W.entities,
   radar,
-  WX_CELLS,
+  W.wxCells,
   director,
   ev => {
     const brg = String(ev.brg).padStart(3, '0');
     switch (ev.kind) {
       case 'NEW':
+        audio.newTrack();
         log(`NEW TRACK ${ev.tn} BRG ${brg} RNG ${ev.rngKm} KM`, 'hl');
         break;
       case 'FADED':
@@ -128,21 +241,28 @@ const world = new World(
         log(`TRACK ${ev.tn} DATALINK ID — FRIENDLY`, 'hl');
         break;
       case 'VIOLATION_NOTE':
+        audio.violation();
         log(`⚑ ${ev.text ?? ''} (TRACK ${ev.tn})`, 'err');
         break;
       case 'MISSILE':
+        audio.launch();
         log(`▲ ${ev.text ?? ''} (TRACK ${ev.tn})`, 'hl');
         break;
       case 'INTERCEPT':
+        audio.interceptMiss();
         log(`✖ ${ev.text ?? ''} (TRACK ${ev.tn})`, 'warn');
         break;
       case 'DESTROYED':
+        audio.interceptKill();
         log(`✔ ${ev.text ?? ''} — TRACK ${ev.tn} DESTROYED`, 'hl');
         break;
       case 'FRATRICIDE':
+        audio.interceptKill();
+        audio.violation();
         log(`✖✖ FRATRICIDE — ${ev.text ?? ''} (TRACK ${ev.tn})`, 'err');
         break;
       case 'LEAKER':
+        audio.leaker();
         log(`⚠ ${ev.text ?? ''} (TRACK ${ev.tn})`, 'err');
         break;
       case 'RELOAD':
@@ -152,13 +272,13 @@ const world = new World(
         log(`ENGAGE DENIED — ${ev.text ?? ''} (TRACK ${ev.tn})`, 'warn');
         break;
       default:
-        break; // CONFIRMED/COASTING are visible in the table — too chatty for the log
+        break;
     }
   },
   radio,
 );
 
-const ppi = new PPI(document.getElementById('ppi') as HTMLCanvasElement, world, MISSION.rangeKm * 1000);
+const ppi = new PPI(document.getElementById('ppi') as HTMLCanvasElement, world, W.rangeKm * 1000);
 const table = new TrackTable(world);
 
 function select(tn: number | null): void {
@@ -172,6 +292,7 @@ table.onDrop = tn => {
   if (world.dropTrack(tn)) select(null);
 };
 table.onIff = tn => {
+  audio.iffChirp();
   world.interrogate(tn);
 };
 table.onDeclare = (tn, identity) => {
@@ -185,7 +306,7 @@ table.onAbort = tn => {
   if (n) log(`✖ SELF-DESTRUCT — ${n} MISSILE${n > 1 ? 'S' : ''} DESTROYED (TRACK ${tn})`, 'warn');
 };
 
-document.getElementById('mission-name')!.textContent = MISSION.name;
+document.getElementById('mission-name')!.textContent = W.name;
 
 // ----- fire units strip -----
 
@@ -238,23 +359,25 @@ function renderFireStrip(): void {
   fsRounds.textContent = `${w.roundsReady()} RDY`;
 }
 
+// ----- flight plans panel -----
+
 const plansTbody = document.getElementById('plans-tbody')!;
 const plansClock = document.getElementById('plans-clock')!;
 const plansPanel = document.getElementById('plans-panel')!;
 
 function renderFlightPlans(): void {
-  if (!FLIGHT_PLANS_IN_USE.length) {
+  if (!W.flightPlans.length) {
     plansPanel.style.display = 'none';
     return;
   }
   const t = world.time;
-  plansClock.textContent = fmtZulu(MISSION.startSeconds + t).slice(0, 5) + 'Z';
-  const rows = FLIGHT_PLANS_IN_USE.map(p => {
+  plansClock.textContent = fmtZulu(W.startSeconds + t).slice(0, 5) + 'Z';
+  const rows = W.flightPlans.map(p => {
     const active = t >= p.fromS && t <= p.toS;
     const expired = t > p.toS;
     const windowTxt = expired
       ? 'EXPIRED'
-      : `${fmtZulu(MISSION.startSeconds + Math.max(0, p.fromS)).slice(0, 5)}–${fmtZulu(MISSION.startSeconds + p.toS).slice(0, 5)}`;
+      : `${fmtZulu(W.startSeconds + Math.max(0, p.fromS)).slice(0, 5)}–${fmtZulu(W.startSeconds + p.toS).slice(0, 5)}`;
     return `<tr class="${active ? '' : 'plan-inactive'}">
       <td>${p.callsign}</td><td>${p.route}</td><td>${(p.altFt / 1000).toFixed(0)}k</td><td>${p.speedKt}</td>
       <td>${windowTxt}</td>
@@ -294,6 +417,7 @@ function refreshEmconUi(): void {
 
 function setEmcon(mode: EmconMode): void {
   if (!radar.setMode(mode)) return;
+  audio.setRadiating(radar.radiating);
   if (mode === 'SILENT') log('EMCON SILENT — RADAR OFF, TRACKS WILL FADE', 'warn');
   else if (mode === 'SECTOR') log(`RADAR SECTOR FOCUS — DEEP ARC ±${radar.sectorHalfWidthDeg}°, REDUCED ELSEWHERE`);
   else log('RADAR SURVEILLANCE — FULL COVERAGE');
@@ -304,7 +428,13 @@ emcButtons.SURVEILLANCE.addEventListener('click', () => setEmcon('SURVEILLANCE')
 emcButtons.SECTOR.addEventListener('click', () => setEmcon('SECTOR'));
 emcButtons.SILENT.addEventListener('click', () => setEmcon('SILENT'));
 
-// dev/testing hook: ?emcon=silent|sector (optionally &aim=DDD initial sector bearing)
+ppi.onAim = brg => {
+  radar.sectorBearing = brg;
+  log(`SECTOR AIMED ${String(Math.round(brg)).padStart(3, '0')}°`);
+  refreshEmconUi();
+};
+
+// dev/testing hooks in URL
 {
   const em = params.get('emcon');
   if (em === 'silent') setEmcon('SILENT');
@@ -316,25 +446,13 @@ emcButtons.SILENT.addEventListener('click', () => setEmcon('SILENT'));
 }
 refreshEmconUi();
 
-ppi.onAim = brg => {
-  radar.sectorBearing = brg;
-  log(`SECTOR AIMED ${String(Math.round(brg)).padStart(3, '0')}°`);
-  refreshEmconUi();
-};
-
 // ----- time controls -----
 
-let timeScaleIdx = 1; // 1×
-
-// dev/testing hook: ?t=0|1|4|16 sets the initial time scale
-{
-  const t = params.get('t');
-  if (t === '0' || t === '1' || t === '4' || t === '16') {
-    timeScaleIdx = [0, 1, 4, 16].indexOf(Number(t));
-  }
-}
+let timeScaleIdx = devAutostart ? [0, 1, 4, 16].indexOf(Number(params.get('t'))) : 0;
+if (timeScaleIdx < 0) timeScaleIdx = 1;
 
 function setTimeScale(idx: number): void {
+  if (watchEnded) return;
   timeScaleIdx = idx;
   for (const [i, id] of ['btn-pause', 'btn-1x', 'btn-4x', 'btn-16x'].entries()) {
     document.getElementById(id)!.classList.toggle('active', i === idx);
@@ -344,12 +462,21 @@ document.getElementById('btn-pause')!.addEventListener('click', () => setTimeSca
 document.getElementById('btn-1x')!.addEventListener('click', () => setTimeScale(1));
 document.getElementById('btn-4x')!.addEventListener('click', () => setTimeScale(2));
 document.getElementById('btn-16x')!.addEventListener('click', () => setTimeScale(3));
-setTimeScale(timeScaleIdx); // reflect URL-param initial state on the buttons
+setTimeScale(timeScaleIdx);
 
 window.addEventListener('keydown', ev => {
+  if (phase !== 'watch') {
+    if (ev.code === 'Space' && phase === 'briefing') {
+      ev.preventDefault();
+      beginWatch();
+    }
+    return;
+  }
   if (ev.code === 'Space') {
     ev.preventDefault();
     setTimeScale(timeScaleIdx === 0 ? 1 : 0);
+  } else if (ev.key === 'Escape') {
+    location.assign('/');
   } else if (ev.key === '1') setTimeScale(1);
   else if (ev.key === '2') setTimeScale(2);
   else if (ev.key === '3') setTimeScale(3);
@@ -357,7 +484,10 @@ window.addEventListener('keydown', ev => {
   else if (ev.key === 'd' || ev.key === 'D') {
     if (ppi.selectedTn !== null && world.dropTrack(ppi.selectedTn)) select(null);
   } else if (ev.key === 'i' || ev.key === 'I') {
-    if (ppi.selectedTn !== null) world.interrogate(ppi.selectedTn);
+    if (ppi.selectedTn !== null) {
+      audio.iffChirp();
+      world.interrogate(ppi.selectedTn);
+    }
   } else if (ev.key === 'h' || ev.key === 'H') {
     if (ppi.selectedTn !== null) world.declare(ppi.selectedTn, 'HOS');
   } else if (ev.key === 'f' || ev.key === 'F') {
@@ -380,46 +510,129 @@ window.addEventListener('keydown', ev => {
   }
 });
 
-// ----- main loop -----
+// ----- overlays: menu / briefing / debrief -----
 
-const zuluEl = document.getElementById('zulu')!;
-let acc = 0;
-let lastDom = 0;
-
-let lastErrLog = 0;
-function reportError(tag: string, err: unknown): void {
-  if (performance.now() - lastErrLog > 1000) {
-    lastErrLog = performance.now();
-    log(`${tag}: ${err instanceof Error ? err.message : String(err)}`, 'err');
-  }
+function showMenu(): void {
+  const st = loadCampaign();
+  const cont = st && !st.finished && st.watchIndex < CAMPAIGN.length;
+  overlay.className = 'ov-show';
+  overlay.innerHTML = `
+    <div class="menu-box">
+      <div class="menu-title">SENTINEL</div>
+      <div class="menu-sub">ENGAGEMENT CONTROL STATION · A REALISTIC AIR DEFENSE WATCH</div>
+      <div class="menu-sec">CAMPAIGN</div>
+      ${cont ? `<button class="mbtn" id="m-continue">CONTINUE — ${CAMPAIGN_NAME} · WATCH ${st!.watchIndex + 1}</button>` : ''}
+      <button class="mbtn" id="m-new">${st ? 'RESTART CAMPAIGN' : `BEGIN CAMPAIGN — ${CAMPAIGN_NAME}`}</button>
+      ${st?.finished ? `<div class="menu-note">CAMPAIGN COMPLETE — BASE ${st.baseIntegrity}% · ${st.totals.kills} KILLS · ${st.totals.fratricides} FRATRICIDES</div>` : ''}
+      <div class="menu-sec">TRIAL WATCHES</div>
+      <button class="mbtn mbtn-small" data-trial="m4">FIRST SHOT 04 — weapons</button>
+      <button class="mbtn mbtn-small" data-trial="m3">CORRIDOR WATCH 03 — identification</button>
+      <button class="mbtn mbtn-small" data-trial="m2">NIGHT WATCH 02 — detection</button>
+      <button class="mbtn mbtn-small" data-trial="m1">SCOPE TRIAL 01 — the scope</button>
+      <div class="menu-note">SPACE pause · arrows select · I interrogate · H/F declare · E engage · X abort · D drop · T truth</div>
+    </div>`;
+  overlay.querySelector('#m-new')?.addEventListener('click', () => {
+    audio.unlock();
+    audio.uiClick();
+    clearCampaign();
+    location.assign('/?campaign=ds&watch=0');
+  });
+  overlay.querySelector('#m-continue')?.addEventListener('click', () => {
+    audio.unlock();
+    audio.uiClick();
+    location.assign(`/?campaign=ds&watch=${st!.watchIndex}`);
+  });
+  overlay.querySelectorAll<HTMLButtonElement>('[data-trial]').forEach(b =>
+    b.addEventListener('click', () => {
+      audio.unlock();
+      audio.uiClick();
+      location.assign(`/?sc=${b.dataset.trial}`);
+    }),
+  );
 }
 
-/**
- * Sim + DOM driver runs on setInterval so the world keeps turning when the tab
- * is hidden (browsers pause requestAnimationFrame on hidden pages). Rendering
- * stays on RAF and simply resumes when visible again.
- */
-function stepSim(dtReal: number): void {
-  const scale = TIME_SCALES[timeScaleIdx];
-  if (scale > 0) {
-    acc += dtReal * scale;
-    let steps = 0;
-    while (acc >= DT && steps < 9000) {
-      const a0 = world.sweepAngle;
-      world.step(DT);
-      const a1 = world.sweepAngle;
-      const blips = world.sweepCross(a0, a1);
-      if (blips.length) ppi.stamp(blips);
-      acc -= DT;
-      steps++;
-    }
-    if (steps >= 9000) acc = 0; // dropped time after long suspension
-  }
+function showBriefing(): void {
+  overlay.className = 'ov-show';
+  overlay.innerHTML = `
+    <div class="brief-box">
+      <div class="brief-title">${W.name}</div>
+      <div class="brief-sub">${fmtZulu(W.startSeconds).slice(0, 5)}Z · WEAPONS ${W.startWcs} · ${W.endT / 60} MIN WATCH</div>
+      <div class="brief-lines">${W.briefing.map(l => `<p>${l}</p>`).join('')}</div>
+      <button class="mbtn" id="b-begin">BEGIN WATCH ▶</button>
+      <div class="menu-note">SPACE also begins</div>
+    </div>`;
+  overlay.querySelector('#b-begin')?.addEventListener('click', beginWatch);
 }
 
-// ----- dev/testing hook: ?demo=m3 runs a scripted operator sequence -----
-// Calls the same select/interrogate/declare APIs the buttons use, so the whole
-// identification + consequence flow can be verified without live input.
+function beginWatch(): void {
+  audio.unlock();
+  audio.uiClick();
+  overlay.className = 'ov-hide';
+  phase = 'watch';
+  setTimeScale(1);
+  log('ECS POWER-UP — BIT IN PROGRESS');
+  log('RADAR SET — SURVEILLANCE MODE — 15 RPM');
+  for (const c of W.wxCells) {
+    const brg = String(Math.round(bearingDeg(c.x, c.y))).padStart(3, '0');
+    const rng = Math.round(Math.hypot(c.x, c.y) / 1000);
+    log(`WX CELL BRG ${brg} RNG ${rng} KM — REDUCED DETECTION`, 'warn');
+  }
+  log('SYSTEM READY — MONITORING');
+}
+
+function enterDebrief(): void {
+  phase = 'debrief';
+  watchEnded = true;
+  timeScaleIdx = 0;
+  for (const [i, id] of ['btn-pause', 'btn-1x', 'btn-4x', 'btn-16x'].entries()) {
+    document.getElementById(id)!.classList.toggle('active', i === 0);
+  }
+
+  if (W.isCampaign) {
+    const st = campaignState ?? freshCampaign();
+    campaignState = applyWatchResult(st, CAMPAIGN[W.watchIndex].id, world.score, CAMPAIGN.length);
+  }
+
+  overlay.className = 'ov-show';
+  overlay.innerHTML = renderDebrief({
+    world,
+    missionName: W.name,
+    startSeconds: W.startSeconds,
+    wcsLog,
+    campaign: campaignState,
+    campaignLength: CAMPAIGN.length,
+    isCampaign: W.isCampaign,
+  });
+
+  overlay.querySelector('#db-next')?.addEventListener('click', () =>
+    location.assign(`/?campaign=ds&watch=${Math.min(CAMPAIGN.length - 1, (campaignState?.watchIndex ?? W.watchIndex + 1))}`),
+  );
+  overlay.querySelector('#db-retry')?.addEventListener('click', () => location.reload());
+  overlay.querySelector('#db-menu')?.addEventListener('click', () => location.assign('/'));
+  overlay.querySelector('#db-campaign-end')?.addEventListener('click', () => location.assign('/'));
+}
+
+if (phase === 'menu') showMenu();
+else if (phase === 'briefing') showBriefing();
+
+// boot log lines for dev-autostart watches (briefing path logs its own)
+if (phase === 'watch') {
+  log('ECS POWER-UP — BIT IN PROGRESS');
+  log('RADAR SET — SURVEILLANCE MODE — 15 RPM');
+  log('SYSTEM READY — MONITORING');
+}
+
+// dev hook: jump straight to the debrief for AAR testing
+if (params.has('end')) {
+  world.time = Math.max(0, W.endT - 3);
+}
+
+// surface runtime errors in the log panel instead of silently killing the loop
+window.addEventListener('error', ev => {
+  log(`RUNTIME ERROR: ${ev.message}`, 'err');
+});
+
+// ----- scripted operator for automated verification -----
 
 interface DemoStep {
   atT: number;
@@ -483,10 +696,28 @@ const demoQueue: DemoStep[] = params.get('demo') === 'm3'
           log('DEMO ▸ AUTO ENGAGE ENABLED BY OPERATOR', 'warn');
         } },
       ]
-    : [];
+    : params.get('demo') === 'ds'
+      ? [
+          { atT: 135, label: 'DECLARE + ENGAGE FIRST SCUD', run: () => {
+            const tn = findTrackBy((_a, s, id) => id !== 'FND' && s > 900);
+            if (tn !== null) { select(tn); world.declare(tn, 'HOS'); world.engage(tn); }
+          } },
+          { atT: 175, label: 'DECLARE + ENGAGE SECOND SCUD', run: () => {
+            const tn = findTrackBy((_a, s, id) => id !== 'FND' && s > 900);
+            if (tn !== null) { select(tn); world.declare(tn, 'HOS'); world.engage(tn); }
+          } },
+          { atT: 225, label: 'DECLARE + ENGAGE THIRD SCUD', run: () => {
+            const tn = findTrackBy((_a, s, id) => id !== 'FND' && s > 900);
+            if (tn !== null) { select(tn); world.declare(tn, 'HOS'); world.engage(tn); }
+          } },
+          { atT: 268, label: 'DECLARE + ENGAGE FOURTH SCUD', run: () => {
+            const tn = findTrackBy((_a, s, id) => id !== 'FND' && s > 900);
+            if (tn !== null) { select(tn); world.declare(tn, 'HOS'); world.engage(tn); }
+          } },
+        ]
+      : [];
 
 let demoIdx = 0;
-
 function runDemo(): void {
   while (demoIdx < demoQueue.length && world.time >= demoQueue[demoIdx].atT) {
     const step = demoQueue[demoIdx++];
@@ -495,24 +726,66 @@ function runDemo(): void {
   }
 }
 
+// ----- main loop -----
+
+const zuluEl = document.getElementById('zulu')!;
+let acc = 0;
+let lastDom = 0;
+let lastErrLog = 0;
+
+function reportError(tag: string, err: unknown): void {
+  if (performance.now() - lastErrLog > 1000) {
+    lastErrLog = performance.now();
+    log(`${tag}: ${err instanceof Error ? err.message : String(err)}`, 'err');
+  }
+}
+
+function stepSim(dtReal: number): void {
+  const scale = TIME_SCALES[timeScaleIdx];
+  if (scale > 0) {
+    acc += dtReal * scale;
+    let steps = 0;
+    while (acc >= DT && steps < 9000) {
+      const a0 = world.sweepAngle;
+      world.step(DT);
+      const a1 = world.sweepAngle;
+      const blips = world.sweepCross(a0, a1);
+      if (blips.length) ppi.stamp(blips);
+      acc -= DT;
+      steps++;
+    }
+    if (steps >= 9000) acc = 0; // dropped time after long suspension
+  }
+}
+
 let lastTick = performance.now();
 setInterval(() => {
   const now = performance.now();
-  // generous cap: lets a throttled (hidden-tab) timer catch the sim back up to wall time
   const dtReal = Math.min(10, (now - lastTick) / 1000);
   lastTick = now;
-  try {
-    stepSim(dtReal);
-    runDemo();
-  } catch (err) {
-    reportError('SIM ERROR', err);
+  if (phase === 'watch') {
+    try {
+      stepSim(dtReal);
+      runDemo();
+      if (world.time >= W.endT) enterDebrief();
+    } catch (err) {
+      reportError('SIM ERROR', err);
+    }
   }
   if (now - lastDom > 250) {
     lastDom = now;
-    zuluEl.textContent = `${fmtZulu(MISSION.startSeconds + world.time)}Z`;
+    zuluEl.textContent = `${fmtZulu(W.startSeconds + world.time)}Z`;
     table.update(trk => ppi.brgRng(trk));
     renderFlightPlans();
     renderFireStrip();
+    // TBM alarm: announced once per track when the classifier catches hypersonic
+    for (const trk of world.tracks.values()) {
+      if (trk.autoClass === 'TBM' && !tbmAnnounced.has(trk.tn)) {
+        tbmAnnounced.add(trk.tn);
+        audio.tbmAlert();
+        log(`⚠ TRACK ${trk.tn} CLASSIFIED TBM — HIGH-SPEED TARGET`, 'err');
+      }
+    }
     if (radar.warming) refreshEmconUi();
   }
 }, 100);
@@ -529,21 +802,3 @@ function renderLoop(now: number): void {
   requestAnimationFrame(renderLoop);
 }
 requestAnimationFrame(renderLoop);
-
-// ----- boot log -----
-
-log('ECS POWER-UP — BIT IN PROGRESS');
-log('RADAR SET — SURVEILLANCE MODE — 15 RPM');
-if (WX_CELLS.length) {
-  for (const c of WX_CELLS) {
-    const brg = String(Math.round(bearingDeg(c.x, c.y))).padStart(3, '0');
-    const rng = Math.round(Math.hypot(c.x, c.y) / 1000);
-    log(`WX CELL BRG ${brg} RNG ${rng} KM — REDUCED DETECTION`, 'warn');
-  }
-}
-log('SYSTEM READY — MONITORING');
-
-// surface runtime errors in the log panel instead of silently killing the loop
-window.addEventListener('error', ev => {
-  log(`RUNTIME ERROR: ${ev.message}`, 'err');
-});

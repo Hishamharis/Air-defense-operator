@@ -24,6 +24,9 @@ export function classifyTrack(speedMs: number, altM: number, headingChurnDeg: nu
     // crawl-speed low: almost certainly birds or debris — but a hovering drone hides here too
     return { label: 'BIRD', conf: 'POOR' };
   }
+  if (kt > 900) {
+    return { label: 'TBM', conf: 'GOOD' }; // hypersonic in the terminal envelope: ballistic
+  }
   if (ft < 4000 && kt < 160) {
     // slow-low envelope: UAV / HELO / light aircraft — genuinely ambiguous
     if (headingChurnDeg > 20) return { label: 'HELO', conf: 'POOR' };

@@ -6,6 +6,7 @@ export const MISSION = {
   startSeconds: 2 * 3600 + 14 * 60,
   rangeKm: 100,
   radarHeightM: 20,
+  endT: 520,
 };
 
 export const ENTITIES: EntityDef[] = [

@@ -193,9 +193,11 @@ export class WeaponsSystem {
       m.y += m.vy * dt;
       m.altM += (target.altM - m.altM) * Math.min(1, dt * 0.5);
 
-      // fuze
+      // fuze — planar-only against TBMs: a steep terminal dive makes a vertical
+      // gate meaningless, the intercept is decided in the terminal envelope
       const planar = Math.hypot(target.x - m.x, target.y - m.y);
-      if (planar < FUZE_RADIUS && Math.abs(target.altM - m.altM) < FUZE_ALT) {
+      const altOk = target.def.ballistic ? true : Math.abs(target.altM - m.altM) < FUZE_ALT;
+      if (planar < FUZE_RADIUS && altOk) {
         const pk = this.pkAtIntercept(m, target);
         const killed = Math.random() < pk;
         m.dead = true;

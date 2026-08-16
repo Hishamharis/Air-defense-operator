@@ -8,7 +8,18 @@ export type EntityClass =
   | 'DRONE'
   | 'HELO'
   | 'BIRD'
-  | 'CLUTTER';
+  | 'CLUTTER'
+  | 'TBM';
+
+/** Ballistic (TBM) trajectory: parabolic arc from one point to another. */
+export interface BallisticProfile {
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  apogeeM: number;
+  flightS: number;
+}
 
 /** A scripted leg: at world time atT the entity turns to headingDeg (and changes speed if given). */
 export interface Leg {
@@ -40,6 +51,8 @@ export interface EntityDef {
   neutral?: boolean;
   /** this aircraft is covered by a flight plan row in the ATO (commander can cite it) */
   planCallsign?: string;
+  /** ballistic trajectory: overrides legs/kinematics entirely */
+  ballistic?: BallisticProfile;
 }
 
 export interface Entity {
@@ -114,6 +127,7 @@ export const CLASS_RCS: Record<EntityClass, number> = {
   HELO: 2,
   BIRD: 0.05,
   CLUTTER: 0.8,
+  TBM: 0.5,
 };
 
 /** Datalink-derived identity note for friendlies (full IFF arrives in M3). */
@@ -126,6 +140,7 @@ export const CLASS_LABEL: Record<EntityClass, string> = {
   HELO: 'HELO',
   BIRD: 'SLO',
   CLUTTER: 'SLO',
+  TBM: 'TBM',
 };
 
 export const MS_TO_KT = 1.94384;

@@ -43,6 +43,8 @@ export interface TrackEvent {
   brg: number;
   rngKm: number;
   text?: string;
+  /** world time of the event (for the debrief narrative) */
+  t?: number;
 }
 
 const DROP_AFTER_MISSED = 3; // sweeps without detection before a track fades
@@ -78,6 +80,8 @@ export class World {
   private lastAutoT = -999;
   /** recent intercept points for the scope's expanding-ring flashes */
   readonly flashes: { x: number; y: number; t: number; kind: 'KILL' | 'MISS' | 'FRAT' }[] = [];
+  /** full event archive — the debrief replays the watch from this */
+  readonly history: TrackEvent[] = [];
 
   constructor(
     defs: EntityDef[],
@@ -114,6 +118,19 @@ export class World {
       if (!e.spawned) {
         if (this.time >= e.def.spawnT) e.spawned = true;
         else continue;
+      }
+      const bal = e.def.ballistic;
+      if (bal) {
+        // parabolic arc: position lerp, altitude parabola; removed on impact
+        const u = Math.min(1, (this.time - e.def.spawnT) / bal.flightS);
+        const nu = Math.min(1, u + dt / bal.flightS);
+        e.x = bal.fromX + (bal.toX - bal.fromX) * u;
+        e.y = bal.fromY + (bal.toY - bal.fromY) * u;
+        e.altM = Math.max(50, bal.apogeeM * 4 * u * (1 - u));
+        e.speedMs = Math.hypot(bal.toX - bal.fromX, bal.toY - bal.fromY) / bal.flightS;
+        e.headingDeg = (Math.atan2(bal.toX - bal.fromX, bal.toY - bal.fromY) * 180) / Math.PI;
+        if (nu >= 1) this.resolveTbmImpact(e);
+        continue;
       }
       const legs = e.def.legs ?? [];
       while (e.legIndex < legs.length && this.time >= legs[e.legIndex].atT) {
@@ -166,13 +183,35 @@ export class World {
     const reloadingBefore = this.weapons.units.filter(u => u.state === 'RELOADING').length;
     const outcomes = this.weapons.step(dt, this.time, this.entities);
     if (this.weapons.units.filter(u => u.state === 'RELOADING').length < reloadingBefore) {
-      if (this.onEvent) {
-        this.onEvent({ kind: 'RELOAD', tn: 0, brg: 0, rngKm: 0, text: 'LAUNCHER RELOAD COMPLETE — ROUNDS READY' });
-      }
+      const ev: TrackEvent = { kind: 'RELOAD', tn: 0, brg: 0, rngKm: 0, text: 'LAUNCHER RELOAD COMPLETE — ROUNDS READY' };
+      this.history.push(ev);
+      if (this.onEvent) this.onEvent(ev);
     }
     for (const oc of outcomes) this.resolveIntercept(oc);
     this.autoEngageTick();
     this.leakTick();
+  }
+
+  /** TBM reaches the ground: impact near the defended area counts against the base. */
+  private resolveTbmImpact(e: Entity): void {
+    this.entities = this.entities.filter(x => x.id !== e.id);
+    this.droppedTracks.delete(e.id);
+    const trk = this.tracks.get(e.id);
+    const distKm = Math.hypot(e.def.ballistic!.toX, e.def.ballistic!.toY) / 1000;
+    if (distKm < 12) {
+      this.score.leakers.push(e.def.callsign);
+      if (this.onRadio) this.onRadio('IMPACT — GROUND IMPACT INSIDE THE DEFENDED AREA.');
+      if (trk) {
+        this.tracks.delete(e.id);
+        this.emit('LEAKER', trk, 'BALLISTIC IMPACT INSIDE DEFENDED AREA');
+      }
+    } else {
+      if (this.onRadio) this.onRadio(`IMPACT REPORTED ${Math.round(distKm)} KM OUT — NO EFFECT TO ASSET.`);
+      if (trk) {
+        this.tracks.delete(e.id);
+        this.emit('DESTROYED', trk, 'TBM IMPACT OUTSIDE DEFENDED AREA — NO EFFECT');
+      }
+    }
   }
 
   private resolveIntercept(oc: InterceptOutcome): void {
@@ -311,10 +350,12 @@ export class World {
   }
 
   private emit(kind: TrackEvent['kind'], trk: Track, text?: string): void {
-    if (!this.onEvent) return;
     const brg = Math.round(bearingDeg(trk.est.x, trk.est.y));
     const rngKm = Math.round(Math.hypot(trk.est.x, trk.est.y) / 1000);
-    this.onEvent({ kind, tn: trk.tn, brg, rngKm, text });
+    const ev = { kind, tn: trk.tn, brg, rngKm, text, t: this.time };
+    this.history.push(ev);
+    if (!this.onEvent) return;
+    this.onEvent(ev);
   }
 
   /** Called when the beam sweeps across arc (a0, a1]: roll detections, manage tracks. */

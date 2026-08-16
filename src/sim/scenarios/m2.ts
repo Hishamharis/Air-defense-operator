@@ -17,6 +17,7 @@ export const MISSION = {
   startSeconds: 22 * 3600 + 41 * 60, // 22:41:00Z
   rangeKm: 100,
   radarHeightM: 20,
+  endT: 660,
 };
 
 export const WX_CELLS: WxCell[] = [
