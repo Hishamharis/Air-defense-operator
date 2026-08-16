@@ -1,6 +1,8 @@
 import { Blip, Entity, EntityDef, Track, CLASS_RCS, CLASS_LABEL } from './types';
 import { classifyTrack } from './classify';
 import { RadarModel, WxCell } from './radar';
+import { rollIffReply, iffText } from './iff';
+import { Director } from './director';
 
 export const SWEEP_RPM = 15;
 export const SWEEP_RATE_DEG = SWEEP_RPM * 6; // deg/s
@@ -17,10 +19,22 @@ export interface NewTrackInfo {
 }
 
 export interface TrackEvent {
-  kind: 'NEW' | 'CONFIRMED' | 'COASTING' | 'FADED' | 'REACQ' | 'DROPPED';
+  kind:
+    | 'NEW'
+    | 'CONFIRMED'
+    | 'COASTING'
+    | 'FADED'
+    | 'REACQ'
+    | 'DROPPED'
+    | 'DECL_HOS'
+    | 'DECL_FND'
+    | 'IFF'
+    | 'DATALINK'
+    | 'VIOLATION_NOTE';
   tn: number;
   brg: number;
   rngKm: number;
+  text?: string;
 }
 
 const DROP_AFTER_MISSED = 3; // sweeps without detection before a track fades
@@ -36,19 +50,26 @@ export class World {
 
   readonly radar: RadarModel;
   readonly wxCells: WxCell[];
+  readonly director?: Director;
+  /** end-of-watch tallies for the debrief (M5 will render these) */
+  readonly score = { idViolations: [] as { tn: number; truth: string }[], clearMisses: [] as number[] };
 
   private nextTn = 4101;
   private nextId = 1;
   private sweepSerial = 0;
+  private pendingIff: { entityId: number; atT: number }[] = [];
 
   constructor(
     defs: EntityDef[],
     radar: RadarModel,
     wxCells: WxCell[] = [],
+    director?: Director,
     private onEvent?: (ev: TrackEvent) => void,
+    private onRadio?: (text: string) => void,
   ) {
     this.radar = radar;
     this.wxCells = wxCells;
+    this.director = director;
     for (const def of defs) {
       this.entities.push({
         id: this.nextId++,
@@ -67,6 +88,7 @@ export class World {
   step(dt: number): void {
     this.time += dt;
     this.radar.tick(dt);
+    this.director?.tick(this.time);
 
     for (const e of this.entities) {
       if (!e.spawned) {
@@ -100,6 +122,25 @@ export class World {
         trk.est.y += trk.est.vy * dt;
       }
     }
+
+    // resolve pending IFF interrogations (delayed replies)
+    if (this.pendingIff.length) {
+      const still: typeof this.pendingIff = [];
+      for (const p of this.pendingIff) {
+        if (this.time < p.atT) {
+          still.push(p);
+          continue;
+        }
+        const trk = this.tracks.get(p.entityId);
+        const e = this.entityById(p.entityId);
+        if (!trk || !e) continue; // track dropped mid-interrogation: reply lost
+        const kind = rollIffReply(e);
+        trk.iffPending = false;
+        trk.iffResult = { kind, text: iffText(kind, e, trk.est.altM), t: this.time };
+        this.emit('IFF', trk, trk.iffResult.text);
+      }
+      this.pendingIff = still;
+    }
   }
 
   get sweepAngle(): number {
@@ -115,11 +156,11 @@ export class World {
     return undefined;
   }
 
-  private emit(kind: TrackEvent['kind'], trk: Track): void {
+  private emit(kind: TrackEvent['kind'], trk: Track, text?: string): void {
     if (!this.onEvent) return;
     const brg = Math.round(bearingDeg(trk.est.x, trk.est.y));
     const rngKm = Math.round(Math.hypot(trk.est.x, trk.est.y) / 1000);
-    this.onEvent({ kind, tn: trk.tn, brg, rngKm });
+    this.onEvent({ kind, tn: trk.tn, brg, rngKm, text });
   }
 
   /** Called when the beam sweeps across arc (a0, a1]: roll detections, manage tracks. */
@@ -186,6 +227,11 @@ export class World {
         lastDetectSweep: this.sweepSerial,
         autoClass: '??',
         classConf: 'POOR',
+        identity: 'UNK',
+        idSource: '',
+        iffResult: null,
+        iffPending: false,
+        violations: 0,
       };
       this.tracks.set(e.id, trk);
       this.emit('NEW', trk);
@@ -221,6 +267,12 @@ export class World {
     if (!wasConfirmed && trk.paints >= 2) {
       trk.state = 'TRACKED';
       this.emit('CONFIRMED', trk);
+      // link-list friendlies arrive identified once the track is solid
+      if (e.def.datalinkId && trk.identity === 'UNK') {
+        trk.identity = 'FND';
+        trk.idSource = 'DATALINK';
+        this.emit('DATALINK', trk, 'LINK-16 ID — FRIENDLY');
+      }
     } else if (trk.state === 'COAST') {
       trk.state = 'TRACKED';
     }
@@ -298,6 +350,75 @@ export class World {
       }
     }
     return false;
+  }
+
+  /** Start an IFF interrogation on a track. Reply lands 1–2s later. */
+  interrogate(tn: number): boolean {
+    const trk = this.trackByTn(tn);
+    if (!trk || trk.state === 'PLOT' || trk.iffPending) return false;
+    trk.iffPending = true;
+    this.pendingIff.push({ entityId: trk.entityId, atT: this.time + 1 + Math.random() });
+    return true;
+  }
+
+  /**
+   * Operator identity declaration. Hostile declarations are blocked under
+   * WEAPONS HOLD, challenged when the commander's picture (datalink / ATO)
+   * contradicts the call, and cautioned when the IFF facts contradict it.
+   * Truth mismatches are tallied for the debrief either way.
+   */
+  declare(tn: number, identity: 'HOS' | 'FND'): boolean {
+    const trk = this.trackByTn(tn);
+    if (!trk || trk.state === 'PLOT') return false;
+    const e = this.entityById(trk.entityId);
+    if (!e) return false;
+
+    if (identity === 'HOS') {
+      const wcs = this.director?.wcs ?? 'TIGHT';
+      if (wcs === 'HOLD') {
+        if (this.onRadio) this.onRadio('NEGATIVE, SENTINEL — WEAPONS HOLD IN EFFECT. HOLD FIRE.');
+        return false;
+      }
+
+      const wasFnd = trk.identity === 'FND';
+      trk.identity = 'HOS';
+      trk.idSource = 'OPERATOR';
+      this.emit('DECL_HOS', trk);
+
+      // the ECS flags a declaration that contradicts its own IFF facts
+      if (trk.iffResult?.kind === 'C') {
+        this.emit('VIOLATION_NOTE', trk, 'ID CAUTION — TRACK SHOWS MODE C PATTERN');
+      }
+
+      const truthProtected = e.def.friendly || e.def.neutral;
+      if (truthProtected) {
+        trk.violations++;
+        this.score.idViolations.push({ tn: trk.tn, truth: e.def.callsign });
+        if (e.def.datalinkId) {
+          if (this.onRadio) this.onRadio(`SENTINEL, CONFIRM ${trk.tn} HOSTILE — WE SHOW THAT TRACK FRIENDLY ON LINK.`);
+          this.emit('VIOLATION_NOTE', trk, 'ID VIOLATION LOGGED — TRACK IS LINK FRIENDLY');
+        } else if (e.def.planCallsign) {
+          if (this.onRadio) this.onRadio(`SENTINEL, ${trk.tn} CORRELATES ${e.def.planCallsign} ON THE ATO. CONFIRM.`);
+          this.emit('VIOLATION_NOTE', trk, `ID VIOLATION LOGGED — CORRELATES ${e.def.planCallsign}`);
+        }
+        // off-plan neutrals: no one can refute it tonight — the debrief will
+      } else if (!wasFnd && Math.random() < 0.5) {
+        if (this.onRadio) this.onRadio(`GOOD COPY. TRACK ${trk.tn} HOSTILE, LOGGED.`);
+      }
+      return true;
+    }
+
+    // friendly declaration
+    trk.identity = 'FND';
+    trk.idSource = 'OPERATOR';
+    this.emit('DECL_FND', trk);
+    if (!e.def.friendly && !e.def.neutral) {
+      this.score.clearMisses.push(trk.tn); // quietly cleared a real threat — debrief material
+      if (Math.random() < 0.3 && this.onRadio) {
+        this.onRadio(`COPY... WHAT IS YOUR BASIS ON ${trk.tn}, SENTINEL?`);
+      }
+    }
+    return true;
   }
 
   /** Truth label for debugging overlays only. */

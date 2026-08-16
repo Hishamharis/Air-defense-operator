@@ -1,3 +1,5 @@
+import type { Transponder, IffResult } from './iff';
+
 export type EntityClass =
   | 'FIGHTER'
   | 'BOMBER'
@@ -30,6 +32,14 @@ export interface EntityDef {
   legs?: Leg[];
   /** short-lived clutter return (weather false plot): entity removed after this many seconds */
   ttlS?: number;
+  /** IFF transponder capability */
+  transponder?: Transponder;
+  /** appears as friendly on the datalink link-list without operator work */
+  datalinkId?: boolean;
+  /** civil / neutral traffic (airliners etc.) — shooting these is a violation */
+  neutral?: boolean;
+  /** this aircraft is covered by a flight plan row in the ATO (commander can cite it) */
+  planCallsign?: string;
 }
 
 export interface Entity {
@@ -53,6 +63,9 @@ export interface Blip {
 }
 
 export type TrackState = 'PLOT' | 'TRACKED' | 'COAST';
+
+/** Console identity state — only OPERATOR/DATALINK sources are player-visible. */
+export type TrackIdentity = 'UNK' | 'FND' | 'HOS';
 
 /** Player-side representation of an entity: created on first radar paint,
  *  dead-reckoned between sweeps, coasting through misses, dropped when faded. */
@@ -83,6 +96,13 @@ export interface Track {
   lastDetectSweep: number;
   autoClass: string;
   classConf: 'GOOD' | 'FAIR' | 'POOR';
+  /** identification */
+  identity: TrackIdentity;
+  idSource: 'DATALINK' | 'IFF' | 'OPERATOR' | '';
+  iffResult: IffResult | null;
+  iffPending: boolean;
+  /** operator mistakes recorded on this track (revealed live + debrief) */
+  violations: number;
 }
 
 export const CLASS_RCS: Record<EntityClass, number> = {
@@ -110,3 +130,14 @@ export const CLASS_LABEL: Record<EntityClass, string> = {
 
 export const MS_TO_KT = 1.94384;
 export const M_TO_FT = 3.28084;
+
+/** One row of the ATO / flight-plan list the operator cross-checks against. */
+export interface FlightPlan {
+  callsign: string;
+  route: string;
+  altFt: number;
+  speedKt: number;
+  /** mission-time window (s) in which the plan is active */
+  fromS: number;
+  toS: number;
+}

@@ -183,6 +183,7 @@ main {
 
 .id-fnd { color: #7ea6cb; }
 .id-unk { color: var(--amber); }
+.id-hos { color: #c46a66; }
 
 .empty-hint {
   position: absolute;
@@ -268,6 +269,50 @@ main {
 .q-good { color: #8ab48a; }
 
 #track-table tbody tr.row-dim td { opacity: 0.55; }
+
+/* ---------- flight plans ---------- */
+
+.plans-body { overflow-y: auto; max-height: 132px; }
+
+#plans-table { width: 100%; border-collapse: collapse; }
+
+#plans-table th {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--faint);
+  font-weight: 400;
+  text-align: left;
+  padding: 5px 8px 4px;
+  border-bottom: 1px solid var(--border-soft);
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}
+
+#plans-table td {
+  padding: 4px 8px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid #23262b;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+#plans-table td:first-child { color: var(--text); }
+#plans-table tr.plan-inactive td { opacity: 0.4; }
+
+.pill-wcs-free { color: #c46a66 !important; border-color: #5a3230 !important; }
+.pill-wcs-hold { color: var(--amber) !important; border-color: #4d4633 !important; }
+
+/* ---------- radio log lines ---------- */
+
+.log-line.radio { color: #8fb8d8; }
+.log-line.radio .lt { color: #5a7a94; }
+
+.dec-hos { color: #c46a66 !important; border-color: #5a3230 !important; cursor: pointer !important; }
+.dec-hos:hover { background: #2a2220 !important; }
+.dec-fnd { color: #7ea6cb !important; border-color: #35506a !important; cursor: pointer !important; }
+.dec-fnd:hover { background: #1f262e !important; }
 
 /* ---------- fire units ---------- */
 

@@ -1,21 +1,34 @@
 import './style.css';
 import { World, bearingDeg } from './sim/world';
 import { RadarModel, EmconMode } from './sim/radar';
+import { Director, Wcs } from './sim/director';
+import { FlightPlan } from './sim/types';
 import { ENTITIES as M1_ENTITIES, MISSION as M1 } from './sim/scenarios/m1';
 import { ENTITIES as M2_ENTITIES, MISSION as M2, WX_CELLS as M2_WX } from './sim/scenarios/m2';
+import {
+  ENTITIES as M3_ENTITIES,
+  MISSION as M3,
+  WX_CELLS as M3_WX,
+  FLIGHT_PLANS,
+  DIRECTOR,
+} from './sim/scenarios/m3';
 import { PPI } from './console/ppi';
 import { TrackTable } from './console/trackTable';
 
 const DT = 1 / 50; // fixed sim timestep
 const TIME_SCALES = [0, 1, 4, 16];
 
-// ----- scenario select (?sc=m1|m2) -----
+// ----- scenario select (?sc=m1|m2|m3) -----
 
 const params = new URLSearchParams(location.search);
-const useM1 = params.get('sc') === 'm1';
-const ENTITIES = useM1 ? M1_ENTITIES : M2_ENTITIES;
-const MISSION = useM1 ? M1 : M2;
-const WX_CELLS = useM1 ? [] : M2_WX;
+const sc = params.get('sc');
+const useM1 = sc === 'm1';
+const useM2 = sc === 'm2';
+const useM3 = !useM1 && !useM2;
+const ENTITIES = useM1 ? M1_ENTITIES : useM2 ? M2_ENTITIES : M3_ENTITIES;
+const MISSION = useM1 ? M1 : useM2 ? M2 : M3;
+const WX_CELLS = useM1 ? [] : useM2 ? M2_WX : M3_WX;
+const FLIGHT_PLANS_IN_USE: FlightPlan[] = useM3 ? FLIGHT_PLANS : [];
 
 interface LogLine {
   t: number;
@@ -50,25 +63,70 @@ function log(text: string, cls = ''): void {
 // ----- boot -----
 
 const radar = new RadarModel(MISSION.rangeKm, MISSION.radarHeightM ?? 20);
-const world = new World(ENTITIES, radar, WX_CELLS, ev => {
-  const brg = String(ev.brg).padStart(3, '0');
-  switch (ev.kind) {
-    case 'NEW':
-      log(`NEW TRACK ${ev.tn} BRG ${brg} RNG ${ev.rngKm} KM`, 'hl');
-      break;
-    case 'FADED':
-      log(`TRACK ${ev.tn} FADED — PLOTS LOST`, 'warn');
-      break;
-    case 'REACQ':
-      log(`TRACK ${ev.tn} RE-ACQUIRED BRG ${brg} RNG ${ev.rngKm} KM`);
-      break;
-    case 'DROPPED':
-      log(`TRACK ${ev.tn} DROPPED BY OPERATOR`, 'warn');
-      break;
-    default:
-      break; // CONFIRMED/COASTING are visible in the table — too chatty for the log
-  }
-});
+
+const wcsPill = document.getElementById('pill-wcs')!;
+
+function refreshWcsPill(wcs: Wcs): void {
+  wcsPill.textContent = `WEAPONS ${wcs}`;
+  wcsPill.className = `pill ${wcs === 'FREE' ? 'pill-wcs-free' : wcs === 'HOLD' ? 'pill-wcs-hold' : 'pill-blue'}`;
+}
+refreshWcsPill(useM3 ? M3.startWcs : 'TIGHT');
+
+function radio(text: string): void {
+  log(`CMD ▸ ${text}`, 'radio');
+}
+
+const director = new Director(
+  useM3 ? DIRECTOR : [],
+  useM3 ? M3.startWcs : 'TIGHT',
+  wcs => {
+    refreshWcsPill(wcs);
+    log(`WEAPONS CONTROL STATUS: ${wcs}`, 'hl');
+  },
+  radio,
+);
+
+const world = new World(
+  ENTITIES,
+  radar,
+  WX_CELLS,
+  director,
+  ev => {
+    const brg = String(ev.brg).padStart(3, '0');
+    switch (ev.kind) {
+      case 'NEW':
+        log(`NEW TRACK ${ev.tn} BRG ${brg} RNG ${ev.rngKm} KM`, 'hl');
+        break;
+      case 'FADED':
+        log(`TRACK ${ev.tn} FADED — PLOTS LOST`, 'warn');
+        break;
+      case 'DROPPED':
+        log(`TRACK ${ev.tn} DROPPED BY OPERATOR`, 'warn');
+        break;
+      case 'REACQ':
+        log(`TRACK ${ev.tn} RE-ACQUIRED BRG ${brg} RNG ${ev.rngKm} KM`);
+        break;
+      case 'DECL_HOS':
+        log(`TRACK ${ev.tn} DECLARED HOSTILE BY OPERATOR`, 'hl');
+        break;
+      case 'DECL_FND':
+        log(`TRACK ${ev.tn} DECLARED FRIENDLY BY OPERATOR`);
+        break;
+      case 'IFF':
+        log(`TRACK ${ev.tn} IFF: ${ev.text ?? ''}`);
+        break;
+      case 'DATALINK':
+        log(`TRACK ${ev.tn} DATALINK ID — FRIENDLY`, 'hl');
+        break;
+      case 'VIOLATION_NOTE':
+        log(`⚑ ${ev.text ?? ''} (TRACK ${ev.tn})`, 'err');
+        break;
+      default:
+        break; // CONFIRMED/COASTING are visible in the table — too chatty for the log
+    }
+  },
+  radio,
+);
 
 const ppi = new PPI(document.getElementById('ppi') as HTMLCanvasElement, world, MISSION.rangeKm * 1000);
 const table = new TrackTable(world);
@@ -83,8 +141,41 @@ table.onSelect = select;
 table.onDrop = tn => {
   if (world.dropTrack(tn)) select(null);
 };
+table.onIff = tn => {
+  world.interrogate(tn);
+};
+table.onDeclare = (tn, identity) => {
+  world.declare(tn, identity);
+};
 
 document.getElementById('mission-name')!.textContent = MISSION.name;
+
+// ----- flight plans panel -----
+
+const plansTbody = document.getElementById('plans-tbody')!;
+const plansClock = document.getElementById('plans-clock')!;
+const plansPanel = document.getElementById('plans-panel')!;
+
+function renderFlightPlans(): void {
+  if (!FLIGHT_PLANS_IN_USE.length) {
+    plansPanel.style.display = 'none';
+    return;
+  }
+  const t = world.time;
+  plansClock.textContent = fmtZulu(MISSION.startSeconds + t).slice(0, 5) + 'Z';
+  const rows = FLIGHT_PLANS_IN_USE.map(p => {
+    const active = t >= p.fromS && t <= p.toS;
+    const expired = t > p.toS;
+    const windowTxt = expired
+      ? 'EXPIRED'
+      : `${fmtZulu(MISSION.startSeconds + Math.max(0, p.fromS)).slice(0, 5)}–${fmtZulu(MISSION.startSeconds + p.toS).slice(0, 5)}`;
+    return `<tr class="${active ? '' : 'plan-inactive'}">
+      <td>${p.callsign}</td><td>${p.route}</td><td>${(p.altFt / 1000).toFixed(0)}k</td><td>${p.speedKt}</td>
+      <td>${windowTxt}</td>
+    </tr>`;
+  });
+  plansTbody.innerHTML = rows.join('');
+}
 
 // ----- EMCON controls -----
 
@@ -179,6 +270,12 @@ window.addEventListener('keydown', ev => {
   else if (ev.key === 't' || ev.key === 'T') ppi.showTruth = !ppi.showTruth;
   else if (ev.key === 'd' || ev.key === 'D') {
     if (ppi.selectedTn !== null && world.dropTrack(ppi.selectedTn)) select(null);
+  } else if (ev.key === 'i' || ev.key === 'I') {
+    if (ppi.selectedTn !== null) world.interrogate(ppi.selectedTn);
+  } else if (ev.key === 'h' || ev.key === 'H') {
+    if (ppi.selectedTn !== null) world.declare(ppi.selectedTn, 'HOS');
+  } else if (ev.key === 'f' || ev.key === 'F') {
+    if (ppi.selectedTn !== null) world.declare(ppi.selectedTn, 'FND');
   } else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
     const tns = [...world.tracks.values()].sort((a, b) => a.tn - b.tn).map(t => t.tn);
     if (!tns.length) return;
@@ -227,6 +324,64 @@ function stepSim(dtReal: number): void {
   }
 }
 
+// ----- dev/testing hook: ?demo=m3 runs a scripted operator sequence -----
+// Calls the same select/interrogate/declare APIs the buttons use, so the whole
+// identification + consequence flow can be verified without live input.
+
+interface DemoStep {
+  atT: number;
+  label: string;
+  run: () => void;
+}
+
+function findTrackBy(pred: (altFt: number, spdKt: number, identity: string, rngKm: number) => boolean): number | null {
+  for (const trk of world.tracks.values()) {
+    if (trk.state === 'PLOT') continue;
+    const altFt = trk.est.altM * 3.28084;
+    const spdKt = trk.est.speedMs * 1.94384;
+    const rngKm = Math.hypot(trk.est.x, trk.est.y) / 1000;
+    if (pred(altFt, spdKt, trk.identity, rngKm)) return trk.tn;
+  }
+  return null;
+}
+
+const demoQueue: DemoStep[] = params.get('demo') === 'm3'
+  ? [
+      { atT: 100, label: 'SELECT CIVIL (SWA441) + INTERROGATE', run: () => {
+        const tn = findTrackBy((a, _s, id) => id === 'UNK' && a > 24000 && a < 31000);
+        if (tn !== null) { select(tn); world.interrogate(tn); }
+      } },
+      { atT: 110, label: 'DECLARE CIVIL HOSTILE (expect ATO challenge + violation)', run: () => {
+        if (table.selectedTn !== null) world.declare(table.selectedTn, 'HOS');
+      } },
+      { atT: 120, label: 'DECLARE BOMBER HOSTILE', run: () => {
+        const tn = findTrackBy((a, _s, id) => id === 'UNK' && a > 31000);
+        if (tn !== null) { select(tn); world.declare(tn, 'HOS'); }
+      } },
+      { atT: 245, label: 'SELECT JUDO21 (failing M4) + INTERROGATE', run: () => {
+        const tn = findTrackBy((a, _s, id, r) => id === 'UNK' && a > 15000 && a < 19000 && r > 50);
+        if (tn !== null) { select(tn); world.interrogate(tn); }
+      } },
+      { atT: 258, label: 'INTERROGATE JUDO21 AGAIN', run: () => {
+        if (table.selectedTn !== null) world.interrogate(table.selectedTn);
+      } },
+      { atT: 335, label: 'DECLARE RYK214 HOSTILE (off-plan civil, expect caution only)', run: () => {
+        const tn = findTrackBy((a, _s, id, r) => id === 'UNK' && a > 18800 && a < 21500 && r > 55);
+        if (tn !== null) { select(tn); world.declare(tn, 'HOS'); }
+      } },
+    ]
+  : [];
+
+let demoIdx = 0;
+
+function runDemo(): void {
+  while (demoIdx < demoQueue.length && world.time >= demoQueue[demoIdx].atT) {
+    const step = demoQueue[demoIdx++];
+    log(`DEMO ▸ ${step.label}`);
+    step.run();
+  }
+}
+
 let lastTick = performance.now();
 setInterval(() => {
   const now = performance.now();
@@ -235,6 +390,7 @@ setInterval(() => {
   lastTick = now;
   try {
     stepSim(dtReal);
+    runDemo();
   } catch (err) {
     reportError('SIM ERROR', err);
   }
@@ -242,6 +398,7 @@ setInterval(() => {
     lastDom = now;
     zuluEl.textContent = `${fmtZulu(MISSION.startSeconds + world.time)}Z`;
     table.update(trk => ppi.brgRng(trk));
+    renderFlightPlans();
     if (radar.warming) refreshEmconUi();
   }
 }, 100);

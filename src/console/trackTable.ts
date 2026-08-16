@@ -10,6 +10,8 @@ export class TrackTable {
   selectedTn: number | null = null;
   onSelect: ((tn: number | null) => void) | null = null;
   onDrop: ((tn: number) => void) | null = null;
+  onIff: ((tn: number) => void) | null = null;
+  onDeclare: ((tn: number, identity: 'HOS' | 'FND') => void) | null = null;
 
   constructor(private world: World) {
     this.tbody = document.getElementById('track-tbody')!;
@@ -17,8 +19,15 @@ export class TrackTable {
     this.detail = document.getElementById('detail-body')!;
     this.count = document.getElementById('track-count')!;
     this.detail.addEventListener('click', ev => {
-      if ((ev.target as HTMLElement).id === 'btn-drop') {
-        if (this.selectedTn !== null && this.onDrop) this.onDrop(this.selectedTn);
+      const el = ev.target as HTMLElement;
+      if (el.id === 'btn-drop' && this.selectedTn !== null && this.onDrop) {
+        this.onDrop(this.selectedTn);
+      } else if (el.id === 'btn-iff' && this.selectedTn !== null && this.onIff) {
+        this.onIff(this.selectedTn);
+      } else if (el.id === 'btn-dec-hos' && this.selectedTn !== null && this.onDeclare) {
+        this.onDeclare(this.selectedTn, 'HOS');
+      } else if (el.id === 'btn-dec-fnd' && this.selectedTn !== null && this.onDeclare) {
+        this.onDeclare(this.selectedTn, 'FND');
       }
     });
   }
@@ -48,21 +57,21 @@ export class TrackTable {
     }
 
     for (const trk of tracks) {
-      const e = this.world.entityById(trk.entityId);
       const row = rows.get(trk.tn)!;
       const cells = row.children;
       const { rngKm } = ppiBrgRng(trk);
-      const friendly = e?.def.friendly ?? false;
       const spdKt = trk.state === 'PLOT' ? 0 : Math.round((trk.est.speedMs * MS_TO_KT) / 5) * 5;
       const altFt = trk.est.altM * M_TO_FT;
       const alt = altFt < 1000 ? `${Math.round(altFt / 50) * 50}` : `${(altFt / 1000).toFixed(1)}k`;
       const clsTxt = trk.autoClass + (trk.classConf === 'GOOD' ? '' : '?');
+      const idTxt = trk.identity === 'FND' ? 'FND' : trk.identity === 'HOS' ? 'HOS' : 'UNK';
+      const idCls = trk.identity === 'FND' ? 'id-fnd' : trk.identity === 'HOS' ? 'id-hos' : 'id-unk';
 
       cells[0].textContent = String(trk.tn);
       cells[1].textContent = clsTxt;
       cells[1].className = trk.classConf === 'GOOD' ? '' : 'id-unk';
-      cells[2].textContent = friendly ? 'FND' : 'UNK';
-      cells[2].className = friendly ? 'id-fnd' : 'id-unk';
+      cells[2].textContent = idTxt;
+      cells[2].className = idCls;
       cells[3].textContent = spdKt ? String(spdKt) : '—';
       cells[4].textContent = alt;
       cells[5].textContent = trk.state === 'PLOT' ? 'PLOT' : trk.state === 'COAST' ? 'CST' : 'GOOD';
@@ -83,33 +92,42 @@ export class TrackTable {
       return;
     }
     const trk = this.world.trackByTn(this.selectedTn);
-    const e = trk ? this.world.entityById(trk.entityId) : undefined;
-    if (!trk || !e) {
+    if (!trk) {
       this.detail.innerHTML = noSel;
       return;
     }
     const { brg, rngKm } = ppiBrgRng(trk);
-    const friendly = e.def.friendly;
     const altFt = trk.est.altM * M_TO_FT;
     const alt = altFt < 1000 ? `${Math.round(altFt / 50) * 50} FT` : `${(altFt / 1000).toFixed(1)}k FT`;
     const spd = trk.state === 'PLOT' ? '—' : `${Math.round(trk.est.speedMs * MS_TO_KT)} KT`;
     const qual =
       trk.state === 'PLOT' ? 'UNCONFIRMED' : trk.state === 'COAST' ? 'COASTING' : 'GOOD';
     const qualCls = trk.state === 'PLOT' ? 'q-plot' : trk.state === 'COAST' ? 'q-coast' : 'q-good';
+    const idTxt = trk.identity === 'FND' ? 'FND' : trk.identity === 'HOS' ? 'HOS' : 'UNK';
+    const idCls = trk.identity === 'FND' ? 'id-fnd' : trk.identity === 'HOS' ? 'id-hos' : 'id-unk';
+    const iffTxt = trk.iffPending
+      ? '<span class="q-plot">INTERROGATING…</span>'
+      : trk.iffResult
+        ? trk.iffResult.text
+        : '<span style="color:var(--faint)">— NOT INTERROGATED —</span>';
+    const idSrc = trk.idSource ? ` · ${trk.idSource}` : '';
     this.detail.innerHTML = `
       <div class="dt-grid">
         <div class="dt-item"><div class="dt-k">TRACK</div><div class="dt-v">${trk.tn}</div></div>
         <div class="dt-item"><div class="dt-k">CLASS</div><div class="dt-v">${trk.autoClass}${trk.classConf === 'GOOD' ? '' : '?'}</div></div>
-        <div class="dt-item"><div class="dt-k">IDENT</div><div class="dt-v ${friendly ? 'id-fnd' : 'id-unk'}">${friendly ? 'FND' : 'UNK'}</div></div>
+        <div class="dt-item"><div class="dt-k">IDENT</div><div class="dt-v ${idCls}">${idTxt}${idSrc ? `<small style="font-size:9px;color:var(--faint)">${idSrc}</small>` : ''}</div></div>
         <div class="dt-item"><div class="dt-k">QUALITY</div><div class="dt-v ${qualCls}">${qual}</div></div>
         <div class="dt-item"><div class="dt-k">SPD</div><div class="dt-v">${spd}</div></div>
         <div class="dt-item"><div class="dt-k">ALT</div><div class="dt-v">${alt}</div></div>
         <div class="dt-item"><div class="dt-k">BRG</div><div class="dt-v">${String(brg).padStart(3, '0')}°</div></div>
         <div class="dt-item"><div class="dt-k">RNG</div><div class="dt-v">${rngKm} KM</div></div>
       </div>
+      <div class="dt-iff"><span class="dt-k" style="font-size:9px;letter-spacing:0.14em;color:var(--faint);display:block;margin:10px 0 3px;">IFF — MODE 4/C</span>${iffTxt}</div>
       <div class="dt-actions">
-        <button disabled>IFF INTERROGATE — M3</button>
-        <button id="btn-drop">DROP TRACK</button>
+        <button id="btn-iff">IFF INTERROGATE</button>
+        <button id="btn-dec-hos" class="dec-hos">DECLARE HOS</button>
+        <button id="btn-dec-fnd" class="dec-fnd">DECLARE FND</button>
+        <button id="btn-drop">DROP</button>
       </div>`;
   }
 }

@@ -17,7 +17,7 @@
     </div>
     <div class="tb-right">
       <span class="pill pill-amber">DEFCON 3</span>
-      <span class="pill pill-blue">WEAPONS TIGHT</span>
+      <span class="pill pill-blue" id="pill-wcs">WEAPONS TIGHT</span>
       <span class="pill pill-green" id="pill-emcon">EMCON RADIATE</span>
       <span class="tctrl">
         <button id="btn-pause" title="Space">❚❚</button>
@@ -69,13 +69,15 @@
         </div>
       </section>
 
-      <section class="panel" id="fire-panel">
-        <div class="panel-head"><span>FIRE UNITS</span></div>
-        <div class="panel-body fire-body">
-          <div class="fu fu-off">LNCHR 1<br><small>OFFLINE</small></div>
-          <div class="fu fu-off">LNCHR 2<br><small>OFFLINE</small></div>
-          <div class="fu fu-off">LNCHR 3<br><small>OFFLINE</small></div>
-          <div class="fu fu-off">LNCHR 4<br><small>OFFLINE</small></div>
+      <section class="panel" id="plans-panel">
+        <div class="panel-head"><span>FLIGHT PLANS — ATO</span><span class="ph-right" id="plans-clock"></span></div>
+        <div class="panel-body plans-body">
+          <table id="plans-table">
+            <thead>
+              <tr><th>CS</th><th>ROUTE</th><th>ALT</th><th>SPD</th><th>WINDOW</th></tr>
+            </thead>
+            <tbody id="plans-tbody"></tbody>
+          </table>
         </div>
       </section>
     </aside>

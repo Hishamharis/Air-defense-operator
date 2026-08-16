@@ -333,14 +333,11 @@ export class PPI {
   private drawSymbol(ctx: CanvasRenderingContext2D, trk: Track): void {
     // unconfirmed plots stay phosphor blips only — the computer draws no symbol yet
     if (trk.state === 'PLOT') return;
-    const e = this.world.entityById(trk.entityId);
-    if (!e) return;
     const [sx, sy] = this.toScreen(trk.est.x, trk.est.y);
     if (Math.hypot(sx - this.cx, sy - this.cy) > this.radius) return;
 
-    // M2: friendlies arrive pre-identified (datalink); everything else unknown.
-    // M3 replaces this with real IFF/identification gameplay.
-    const color = e.def.friendly ? PAL.friendly : PAL.unknown;
+    // identity now comes from the console's own declarations/datalink, not truth
+    const color = trk.identity === 'FND' ? PAL.friendly : trk.identity === 'HOS' ? PAL.hostile : PAL.unknown;
 
     ctx.save();
     ctx.strokeStyle = color;
@@ -359,7 +356,19 @@ export class PPI {
 
     if (trk.state === 'COAST') ctx.setLineDash([3, 2]);
 
-    if (e.def.friendly) {
+    if (trk.identity === 'HOS') {
+      // declared hostile: red diamond (APP-6 air hostile)
+      ctx.beginPath();
+      ctx.moveTo(sx, sy - 7);
+      ctx.lineTo(sx + 7, sy);
+      ctx.lineTo(sx, sy + 7);
+      ctx.lineTo(sx - 7, sy);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.globalAlpha = trk.state === 'COAST' ? 0.1 : 0.22;
+      ctx.fill();
+      ctx.globalAlpha = trk.state === 'COAST' ? 0.6 : 1;
+    } else if (trk.identity === 'FND') {
       // friendly: circle (air track "dome" flavor)
       ctx.beginPath();
       ctx.arc(sx, sy, 6, 0, Math.PI * 2);
