@@ -65,13 +65,14 @@ export const ENTITIES: EntityDef[] = [
     headingDeg: 168, speedMs: 200,
     spawnT: 30, friendly: false, transponder: 'NONE',
   },
-  // the raid: six drones, staggered, south-east axis
-  { class: 'DRONE', callsign: 'SHD101', x: 30000, y: -82000, altM: 900, headingDeg: 348, speedMs: 42, spawnT: 170, friendly: false, transponder: 'NONE' },
-  { class: 'DRONE', callsign: 'SHD102', x: 44000, y: -78000, altM: 850, headingDeg: 342, speedMs: 42, spawnT: 185, friendly: false, transponder: 'NONE' },
-  { class: 'DRONE', callsign: 'SHD103', x: 18000, y: -86000, altM: 800, headingDeg: 352, speedMs: 42, spawnT: 200, friendly: false, transponder: 'NONE' },
-  { class: 'DRONE', callsign: 'SHD104', x: 52000, y: -74000, altM: 950, headingDeg: 338, speedMs: 42, spawnT: 215, friendly: false, transponder: 'NONE' },
-  { class: 'DRONE', callsign: 'SHD105', x: 10000, y: -88000, altM: 880, headingDeg: 355, speedMs: 42, spawnT: 230, friendly: false, transponder: 'NONE' },
-  { class: 'DRONE', callsign: 'SHD106', x: 38000, y: -80000, altM: 920, headingDeg: 345, speedMs: 42, spawnT: 245, friendly: false, transponder: 'NONE' },
+  // the raid: six drones, staggered, south-east axis (~65 km — inside detection
+  // during the WEAPONS FREE window; a 42 m/s crawl from 85 km would arrive late)
+  { class: 'DRONE', callsign: 'SHD101', x: 22000, y: -60000, altM: 900, headingDeg: 348, speedMs: 42, spawnT: 165, friendly: false, transponder: 'NONE' },
+  { class: 'DRONE', callsign: 'SHD102', x: 34000, y: -58000, altM: 850, headingDeg: 342, speedMs: 42, spawnT: 180, friendly: false, transponder: 'NONE' },
+  { class: 'DRONE', callsign: 'SHD103', x: 14000, y: -63000, altM: 800, headingDeg: 352, speedMs: 42, spawnT: 195, friendly: false, transponder: 'NONE' },
+  { class: 'DRONE', callsign: 'SHD104', x: 40000, y: -55000, altM: 950, headingDeg: 338, speedMs: 42, spawnT: 210, friendly: false, transponder: 'NONE' },
+  { class: 'DRONE', callsign: 'SHD105', x: 8000, y: -65000, altM: 880, headingDeg: 355, speedMs: 42, spawnT: 225, friendly: false, transponder: 'NONE' },
+  { class: 'DRONE', callsign: 'SHD106', x: 28000, y: -59000, altM: 920, headingDeg: 345, speedMs: 42, spawnT: 240, friendly: false, transponder: 'NONE' },
   // two cruise missiles, WSW, terrain-hugging
   { class: 'CRUISE', callsign: 'K101', x: -68000, y: -34000, altM: 60, headingDeg: 42, speedMs: 240, spawnT: 240, friendly: false, transponder: 'NONE' },
   { class: 'CRUISE', callsign: 'K102', x: -74000, y: -26000, altM: 60, headingDeg: 46, speedMs: 240, spawnT: 275, friendly: false, transponder: 'NONE' },

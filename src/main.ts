@@ -365,7 +365,10 @@ window.addEventListener('keydown', ev => {
   } else if (ev.key === 'e' || ev.key === 'E') {
     if (ppi.selectedTn !== null) world.engage(ppi.selectedTn);
   } else if (ev.key === 'x' || ev.key === 'X') {
-    if (ppi.selectedTn !== null) world.weapons.abort(ppi.selectedTn);
+    if (ppi.selectedTn !== null) {
+      const n = world.weapons.abort(ppi.selectedTn);
+      if (n) log(`✖ SELF-DESTRUCT — ${n} MISSILE${n > 1 ? 'S' : ''} DESTROYED (TRACK ${ppi.selectedTn})`, 'warn');
+    }
   } else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
     const tns = [...world.tracks.values()].sort((a, b) => a.tn - b.tn).map(t => t.tn);
     if (!tns.length) return;

@@ -145,7 +145,7 @@ main {
 
 /* ---------- scope ---------- */
 
-.scope-body { padding: 6px; }
+.scope-body { padding: 6px 6px 58px 6px; /* bottom leaves room for the fire strip */ }
 
 #ppi { width: 100%; height: 100%; display: block; cursor: crosshair; }
 

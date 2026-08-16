@@ -67,7 +67,7 @@ export class World {
     kills: 0,
     shots: 0,
     fratricides: [] as { tn: number; truth: string }[],
-    leakers: [] as number[],
+    leakers: [] as string[],
   };
 
   private nextTn = 4101;
@@ -192,9 +192,18 @@ export class World {
       if (protectedTarget) {
         this.score.fratricides.push({ tn: oc.missile.tn, truth: oc.target.def.callsign });
         if (this.onRadio) this.onRadio('SENTINEL, CHECK FIRE. CHECK FIRE.');
+        this.tracks.delete(oc.target.id);
         if (trk) {
-          this.tracks.delete(oc.target.id);
           this.emit('FRATRICIDE', trk, `${oc.target.def.callsign} DESTROYED BY OUR MISSILE`);
+        } else if (this.onEvent) {
+          // track had faded at the moment of intercept — the board still hears about it
+          this.onEvent({
+            kind: 'FRATRICIDE',
+            tn: oc.missile.tn,
+            brg: Math.round(bearingDeg(oc.x, oc.y)),
+            rngKm: Math.round(Math.hypot(oc.x, oc.y) / 1000),
+            text: `${oc.target.def.callsign} DESTROYED BY OUR MISSILE`,
+          });
         }
       } else {
         this.score.kills++;
@@ -232,7 +241,7 @@ export class World {
       if (Math.hypot(e.x, e.y) < 8000 && !this.leakersSeen.has(e.id)) {
         this.leakersSeen.add(e.id);
         const trk = this.tracks.get(e.id);
-        this.score.leakers.push(e.def.callsign.length ? e.id : e.id);
+        this.score.leakers.push(e.def.callsign);
         if (trk) this.emit('LEAKER', trk, 'THREAT PENETRATED INNER RING — SITE UNDER ATTACK');
         else if (this.onRadio) this.onRadio('IMPACT — SITE UNDER ATTACK.');
       }
@@ -383,11 +392,13 @@ export class World {
       return;
     }
 
-    // update with a fresh paint: position jump + smoothed velocity
+    // update with a fresh paint: position jump + smoothed velocity.
+    // velocity comes from the RAW displacement since the LAST PAINT (blip), never
+    // from the dead-reckoned est — est already contains vx·dt, so dividing that
+    // displacement again converges to exactly half the true speed.
     const dtP = Math.max(0.5, now - trk.lastPaintT);
-    const nvx = (e.x - trk.est.x) / dtP;
-    const nvy = (e.y - trk.est.y) / dtP;
-    const prevSpeed = trk.est.speedMs;
+    const nvx = (e.x - trk.blip.x) / dtP;
+    const nvy = (e.y - trk.blip.y) / dtP;
 
     trk.blip = { x: e.x, y: e.y, brightness, t: now };
     trk.est.x = e.x;
@@ -406,6 +417,10 @@ export class World {
       const dHdg = Math.abs(((hdg - trk.est.headingDeg + 540) % 360) - 180);
       if (trk.paints > 2) trk.headingChurnDeg = 0.7 * trk.headingChurnDeg + 0.3 * dHdg * 10;
       trk.est.headingDeg = hdg;
+      // reclassify every paint — kinematics are all the console has
+      const cls = classifyTrack(trk.est.speedMs, trk.est.altM, trk.headingChurnDeg, trk.paints);
+      trk.autoClass = cls.label;
+      trk.classConf = cls.conf;
     }
 
     const wasConfirmed = trk.state === 'TRACKED';
@@ -420,12 +435,6 @@ export class World {
       }
     } else if (trk.state === 'COAST') {
       trk.state = 'TRACKED';
-    }
-
-    if (trk.paints === 2 || (trk.paints > 2 && Math.abs(trk.est.speedMs - prevSpeed) > 15)) {
-      const cls = classifyTrack(trk.est.speedMs, trk.est.altM, trk.headingChurnDeg, trk.paints);
-      trk.autoClass = cls.label;
-      trk.classConf = cls.conf;
     }
   }
 

@@ -14,14 +14,14 @@ export const ENTITIES: EntityDef[] = [
     class: 'AIRLINER', callsign: 'SWA441',
     x: 96000, y: 9000, altM: 8200,
     headingDeg: 268, speedMs: 230,
-    spawnT: 0, friendly: true,
+    spawnT: 0, friendly: true, datalinkId: true, transponder: 'M4',
   },
   // Friendly CAP pair flying a racetrack north-east
   {
     class: 'FIGHTER', callsign: 'VIPER11',
     x: 38000, y: 44000, altM: 7600,
     headingDeg: 100, speedMs: 210,
-    spawnT: 0, friendly: true,
+    spawnT: 0, friendly: true, datalinkId: true, transponder: 'M4',
     legs: [
       { atT: 55, headingDeg: 190 },
       { atT: 145, headingDeg: 280 },
@@ -33,7 +33,7 @@ export const ENTITIES: EntityDef[] = [
     class: 'FIGHTER', callsign: 'VIPER12',
     x: 46000, y: 52000, altM: 7400,
     headingDeg: 100, speedMs: 205,
-    spawnT: 0, friendly: true,
+    spawnT: 0, friendly: true, datalinkId: true, transponder: 'M4',
     legs: [
       { atT: 65, headingDeg: 190 },
       { atT: 155, headingDeg: 280 },
