@@ -12,6 +12,8 @@ export class TrackTable {
   onDrop: ((tn: number) => void) | null = null;
   onIff: ((tn: number) => void) | null = null;
   onDeclare: ((tn: number, identity: 'HOS' | 'FND') => void) | null = null;
+  onEngage: ((tn: number) => void) | null = null;
+  onAbort: ((tn: number) => void) | null = null;
 
   constructor(private world: World) {
     this.tbody = document.getElementById('track-tbody')!;
@@ -20,15 +22,13 @@ export class TrackTable {
     this.count = document.getElementById('track-count')!;
     this.detail.addEventListener('click', ev => {
       const el = ev.target as HTMLElement;
-      if (el.id === 'btn-drop' && this.selectedTn !== null && this.onDrop) {
-        this.onDrop(this.selectedTn);
-      } else if (el.id === 'btn-iff' && this.selectedTn !== null && this.onIff) {
-        this.onIff(this.selectedTn);
-      } else if (el.id === 'btn-dec-hos' && this.selectedTn !== null && this.onDeclare) {
-        this.onDeclare(this.selectedTn, 'HOS');
-      } else if (el.id === 'btn-dec-fnd' && this.selectedTn !== null && this.onDeclare) {
-        this.onDeclare(this.selectedTn, 'FND');
-      }
+      if (this.selectedTn === null) return;
+      if (el.id === 'btn-drop' && this.onDrop) this.onDrop(this.selectedTn);
+      else if (el.id === 'btn-iff' && this.onIff) this.onIff(this.selectedTn);
+      else if (el.id === 'btn-dec-hos' && this.onDeclare) this.onDeclare(this.selectedTn, 'HOS');
+      else if (el.id === 'btn-dec-fnd' && this.onDeclare) this.onDeclare(this.selectedTn, 'FND');
+      else if (el.id === 'btn-engage' && this.onEngage) this.onEngage(this.selectedTn);
+      else if (el.id === 'btn-abort' && this.onAbort) this.onAbort(this.selectedTn);
     });
   }
 
@@ -111,6 +111,17 @@ export class TrackTable {
         ? trk.iffResult.text
         : '<span style="color:var(--faint)">— NOT INTERROGATED —</span>';
     const idSrc = trk.idSource ? ` · ${trk.idSource}` : '';
+    const e = this.world.entityById(trk.entityId);
+    const activeMissiles = this.world.weapons.missiles.filter(m => m.tn === trk.tn && !m.dead).length;
+    const pk = e ? this.world.weapons.estimatePk(e) : 0;
+    const pkTxt =
+      trk.state !== 'PLOT' && e
+        ? `EST PK ${pk.toFixed(2)}${pk < 0.5 ? ' — LOW ENERGY SOLUTION' : ''}`
+        : '';
+    const engageBtn = `<button id="btn-engage" class="btn-engage">▶ ENGAGE (${this.world.weapons.doctrine})</button>`;
+    const abortBtn = activeMissiles
+      ? `<button id="btn-abort" class="btn-abort">✖ ABORT (${activeMissiles})</button>`
+      : '';
     this.detail.innerHTML = `
       <div class="dt-grid">
         <div class="dt-item"><div class="dt-k">TRACK</div><div class="dt-v">${trk.tn}</div></div>
@@ -123,10 +134,12 @@ export class TrackTable {
         <div class="dt-item"><div class="dt-k">RNG</div><div class="dt-v">${rngKm} KM</div></div>
       </div>
       <div class="dt-iff"><span class="dt-k" style="font-size:9px;letter-spacing:0.14em;color:var(--faint);display:block;margin:10px 0 3px;">IFF — MODE 4/C</span>${iffTxt}</div>
+      ${pkTxt ? `<div style="margin-top:8px;font-size:11px;color:${pk < 0.5 ? 'var(--amber)' : '#8ab48a'};font-variant-numeric:tabular-nums;">${pkTxt}</div>` : ''}
       <div class="dt-actions">
         <button id="btn-iff">IFF INTERROGATE</button>
         <button id="btn-dec-hos" class="dec-hos">DECLARE HOS</button>
         <button id="btn-dec-fnd" class="dec-fnd">DECLARE FND</button>
+        ${engageBtn}${abortBtn}
         <button id="btn-drop">DROP</button>
       </div>`;
   }

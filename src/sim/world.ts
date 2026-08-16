@@ -3,6 +3,7 @@ import { classifyTrack } from './classify';
 import { RadarModel, WxCell } from './radar';
 import { rollIffReply, iffText } from './iff';
 import { Director } from './director';
+import { WeaponsSystem, InterceptOutcome } from './weapons';
 
 export const SWEEP_RPM = 15;
 export const SWEEP_RATE_DEG = SWEEP_RPM * 6; // deg/s
@@ -30,7 +31,14 @@ export interface TrackEvent {
     | 'DECL_FND'
     | 'IFF'
     | 'DATALINK'
-    | 'VIOLATION_NOTE';
+    | 'VIOLATION_NOTE'
+    | 'MISSILE'
+    | 'INTERCEPT'
+    | 'DESTROYED'
+    | 'FRATRICIDE'
+    | 'LEAKER'
+    | 'RELOAD'
+    | 'ENGAGE_BLOCKED';
   tn: number;
   brg: number;
   rngKm: number;
@@ -51,13 +59,25 @@ export class World {
   readonly radar: RadarModel;
   readonly wxCells: WxCell[];
   readonly director?: Director;
+  readonly weapons = new WeaponsSystem();
   /** end-of-watch tallies for the debrief (M5 will render these) */
-  readonly score = { idViolations: [] as { tn: number; truth: string }[], clearMisses: [] as number[] };
+  readonly score = {
+    idViolations: [] as { tn: number; truth: string }[],
+    clearMisses: [] as number[],
+    kills: 0,
+    shots: 0,
+    fratricides: [] as { tn: number; truth: string }[],
+    leakers: [] as number[],
+  };
 
   private nextTn = 4101;
   private nextId = 1;
   private sweepSerial = 0;
   private pendingIff: { entityId: number; atT: number }[] = [];
+  private leakersSeen = new Set<number>();
+  private lastAutoT = -999;
+  /** recent intercept points for the scope's expanding-ring flashes */
+  readonly flashes: { x: number; y: number; t: number; kind: 'KILL' | 'MISS' | 'FRAT' }[] = [];
 
   constructor(
     defs: EntityDef[],
@@ -141,6 +161,131 @@ export class World {
       }
       this.pendingIff = still;
     }
+
+    // weapons: flight, fuzing, reloads, auto-engage, leak watch
+    const reloadingBefore = this.weapons.units.filter(u => u.state === 'RELOADING').length;
+    const outcomes = this.weapons.step(dt, this.time, this.entities);
+    if (this.weapons.units.filter(u => u.state === 'RELOADING').length < reloadingBefore) {
+      if (this.onEvent) {
+        this.onEvent({ kind: 'RELOAD', tn: 0, brg: 0, rngKm: 0, text: 'LAUNCHER RELOAD COMPLETE — ROUNDS READY' });
+      }
+    }
+    for (const oc of outcomes) this.resolveIntercept(oc);
+    this.autoEngageTick();
+    this.leakTick();
+  }
+
+  private resolveIntercept(oc: InterceptOutcome): void {
+    const trk = this.tracks.get(oc.target.id);
+    this.flashes.push({
+      x: oc.x,
+      y: oc.y,
+      t: this.time,
+      kind: oc.killed ? (oc.target.def.friendly || oc.target.def.neutral ? 'FRAT' : 'KILL') : 'MISS',
+    });
+    if (this.flashes.length > 12) this.flashes.shift();
+    if (oc.killed) {
+      // remove the target from the world — permanently
+      this.entities = this.entities.filter(e => e.id !== oc.target.id);
+      this.droppedTracks.delete(oc.target.id);
+      const protectedTarget = oc.target.def.friendly || oc.target.def.neutral;
+      if (protectedTarget) {
+        this.score.fratricides.push({ tn: oc.missile.tn, truth: oc.target.def.callsign });
+        if (this.onRadio) this.onRadio('SENTINEL, CHECK FIRE. CHECK FIRE.');
+        if (trk) {
+          this.tracks.delete(oc.target.id);
+          this.emit('FRATRICIDE', trk, `${oc.target.def.callsign} DESTROYED BY OUR MISSILE`);
+        }
+      } else {
+        this.score.kills++;
+        if (trk) {
+          this.tracks.delete(oc.target.id);
+          this.emit('DESTROYED', trk, `HOSTILE DESTROYED · PK ${oc.pk.toFixed(2)}`);
+        }
+      }
+    } else {
+      if (trk) this.emit('INTERCEPT', trk, `MISS — PK WAS ${oc.pk.toFixed(2)} · RE-ENGAGE`);
+    }
+  }
+
+  /** The automation: engages per current WCS with no human in the loop. */
+  private autoEngageTick(): void {
+    if (!this.weapons.autoEngage) return;
+    if (this.time - this.lastAutoT < 4) return;
+    const wcs = this.director?.wcs ?? 'TIGHT';
+    if (wcs === 'HOLD') return;
+    for (const trk of this.tracks.values()) {
+      if (trk.state !== 'TRACKED') continue;
+      const gate = wcs === 'FREE' ? trk.identity !== 'FND' : trk.identity === 'HOS';
+      if (!gate) continue;
+      if (this.weapons.missiles.some(m => m.tn === trk.tn && !m.dead)) continue;
+      this.lastAutoT = this.time;
+      this.engage(trk.tn, true);
+      return; // one engagement per tick window
+    }
+  }
+
+  /** Hostiles crossing the inner ring: the site takes it on the chin. */
+  private leakTick(): void {
+    for (const e of this.entities) {
+      if (!e.spawned || e.def.friendly || e.def.neutral || e.def.class === 'BIRD' || e.def.class === 'CLUTTER') continue;
+      if (Math.hypot(e.x, e.y) < 8000 && !this.leakersSeen.has(e.id)) {
+        this.leakersSeen.add(e.id);
+        const trk = this.tracks.get(e.id);
+        this.score.leakers.push(e.def.callsign.length ? e.id : e.id);
+        if (trk) this.emit('LEAKER', trk, 'THREAT PENETRATED INNER RING — SITE UNDER ATTACK');
+        else if (this.onRadio) this.onRadio('IMPACT — SITE UNDER ATTACK.');
+      }
+    }
+  }
+
+  /**
+   * Launch on a track under the weapons-control status in force.
+   * TIGHT requires the track to be declared hostile; FREE allows anything
+   * not positively friendly; HOLD blocks everything. That last rule is the
+   * only thing standing between AUTO ENGAGE and an airliner.
+   */
+  engage(tn: number, auto = false): boolean {
+    const trk = this.trackByTn(tn);
+    if (!trk || trk.state === 'PLOT') return false;
+    const e = this.entityById(trk.entityId);
+    if (!e) return false;
+
+    const wcs = this.director?.wcs ?? 'TIGHT';
+    if (wcs === 'HOLD') {
+      if (!auto && this.onRadio) this.onRadio('NEGATIVE — WEAPONS HOLD IN EFFECT.');
+      this.emit('ENGAGE_BLOCKED', trk, 'WEAPONS HOLD');
+      return false;
+    }
+    const gate = wcs === 'FREE' ? trk.identity !== 'FND' : trk.identity === 'HOS';
+    if (!gate) {
+      if (!auto) this.emit('ENGAGE_BLOCKED', trk, wcs === 'FREE' ? 'DECLARED FRIENDLY' : 'NOT DECLARED HOSTILE');
+      return false;
+    }
+    if (this.weapons.channelsUsed >= this.weapons.channelsMax) {
+      if (!auto) this.emit('ENGAGE_BLOCKED', trk, 'ALL CHANNELS BUSY');
+      return false;
+    }
+    if (this.weapons.roundsReady() === 0) {
+      if (!auto) this.emit('ENGAGE_BLOCKED', trk, 'NO ROUNDS — ALL LAUNCHERS RELOADING');
+      return false;
+    }
+
+    // engaging protected traffic is a violation the moment the order is given
+    if ((e.def.friendly || e.def.neutral) && !auto) {
+      this.emit('VIOLATION_NOTE', trk, 'ENGAGEMENT OF UNCONFIRMED HOSTILE — LOGGED');
+    }
+
+    const count = this.weapons.doctrine === 'SS' ? 2 : 1;
+    const fired = this.weapons.launch(e.id, trk.tn, count, this.time, e);
+    if (!fired.length) return false;
+    this.score.shots += fired.length;
+    this.emit(
+      'MISSILE',
+      trk,
+      `${auto ? 'AUTO ' : ''}${fired.length} MISSILE${fired.length > 1 ? 'S' : ''} AWAY · ${this.weapons.doctrine} · EST PK ${this.weapons.estimatePk(e).toFixed(2)}`,
+    );
+    return true;
   }
 
   get sweepAngle(): number {

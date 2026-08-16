@@ -270,6 +270,67 @@ main {
 
 #track-table tbody tr.row-dim td { opacity: 0.55; }
 
+/* ---------- fire strip ---------- */
+
+#fire-strip {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  background: rgba(20, 22, 26, 0.88);
+  border: 1px solid var(--border);
+  flex: none;
+}
+
+.fs-units { display: flex; gap: 6px; flex: 1; }
+
+.fsu {
+  padding: 4px 8px;
+  border: 1px solid var(--border-soft);
+  background: #191c20;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  min-width: 86px;
+}
+.fsu .pips { color: #8ab48a; letter-spacing: 2px; }
+.fsu.reloading { color: var(--amber); border-color: #4d4633; }
+.fsu.reloading .pips { color: var(--amber); }
+
+.fs-ctl { display: flex; align-items: center; gap: 6px; }
+
+.fs-lbl { font-size: 8px; letter-spacing: 0.14em; color: var(--faint); }
+
+.fs-ctl .emc { padding: 5px 10px; font-size: 9px; }
+
+.auto-btn {
+  padding: 5px 10px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  color: var(--dim);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  font-family: inherit;
+  cursor: pointer;
+}
+.auto-btn.on { color: #c46a66; border-color: #5a3230; background: #26201e; }
+
+.fs-ch { font-size: 10px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.fs-rounds { font-size: 10px; color: var(--accent); font-variant-numeric: tabular-nums; }
+
+.btn-engage {
+  color: #d8756f !important;
+  border-color: #6a3532 !important;
+  background: #251d1c !important;
+  cursor: pointer !important;
+}
+.btn-engage:hover { background: #322423 !important; }
+.btn-abort { color: var(--amber) !important; border-color: #4d4633 !important; cursor: pointer !important; }
+
 /* ---------- flight plans ---------- */
 
 .plans-body { overflow-y: auto; max-height: 132px; }

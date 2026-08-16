@@ -12,23 +12,32 @@ import {
   FLIGHT_PLANS,
   DIRECTOR,
 } from './sim/scenarios/m3';
+import {
+  ENTITIES as M4_ENTITIES,
+  MISSION as M4,
+  DIRECTOR as M4_DIRECTOR,
+  FLIGHT_PLANS as M4_PLANS,
+} from './sim/scenarios/m4';
 import { PPI } from './console/ppi';
 import { TrackTable } from './console/trackTable';
 
 const DT = 1 / 50; // fixed sim timestep
 const TIME_SCALES = [0, 1, 4, 16];
 
-// ----- scenario select (?sc=m1|m2|m3) -----
+// ----- scenario select (?sc=m1|m2|m3|m4) -----
 
 const params = new URLSearchParams(location.search);
 const sc = params.get('sc');
 const useM1 = sc === 'm1';
 const useM2 = sc === 'm2';
-const useM3 = !useM1 && !useM2;
-const ENTITIES = useM1 ? M1_ENTITIES : useM2 ? M2_ENTITIES : M3_ENTITIES;
-const MISSION = useM1 ? M1 : useM2 ? M2 : M3;
-const WX_CELLS = useM1 ? [] : useM2 ? M2_WX : M3_WX;
-const FLIGHT_PLANS_IN_USE: FlightPlan[] = useM3 ? FLIGHT_PLANS : [];
+const useM3 = sc === 'm3';
+const useM4 = !useM1 && !useM2 && !useM3;
+const ENTITIES = useM1 ? M1_ENTITIES : useM2 ? M2_ENTITIES : useM3 ? M3_ENTITIES : M4_ENTITIES;
+const MISSION = useM1 ? M1 : useM2 ? M2 : useM3 ? M3 : M4;
+const WX_CELLS = useM1 ? [] : useM2 ? M2_WX : useM3 ? M3_WX : [];
+const DIRECTOR_EVENTS = useM3 ? DIRECTOR : useM4 ? M4_DIRECTOR : [];
+const START_WCS = useM3 ? M3.startWcs : useM4 ? M4.startWcs : 'TIGHT';
+const FLIGHT_PLANS_IN_USE: FlightPlan[] = useM3 ? FLIGHT_PLANS : useM4 ? M4_PLANS : [];
 
 interface LogLine {
   t: number;
@@ -70,15 +79,15 @@ function refreshWcsPill(wcs: Wcs): void {
   wcsPill.textContent = `WEAPONS ${wcs}`;
   wcsPill.className = `pill ${wcs === 'FREE' ? 'pill-wcs-free' : wcs === 'HOLD' ? 'pill-wcs-hold' : 'pill-blue'}`;
 }
-refreshWcsPill(useM3 ? M3.startWcs : 'TIGHT');
+refreshWcsPill(START_WCS);
 
 function radio(text: string): void {
   log(`CMD ▸ ${text}`, 'radio');
 }
 
 const director = new Director(
-  useM3 ? DIRECTOR : [],
-  useM3 ? M3.startWcs : 'TIGHT',
+  DIRECTOR_EVENTS,
+  START_WCS,
   wcs => {
     refreshWcsPill(wcs);
     log(`WEAPONS CONTROL STATUS: ${wcs}`, 'hl');
@@ -121,6 +130,27 @@ const world = new World(
       case 'VIOLATION_NOTE':
         log(`⚑ ${ev.text ?? ''} (TRACK ${ev.tn})`, 'err');
         break;
+      case 'MISSILE':
+        log(`▲ ${ev.text ?? ''} (TRACK ${ev.tn})`, 'hl');
+        break;
+      case 'INTERCEPT':
+        log(`✖ ${ev.text ?? ''} (TRACK ${ev.tn})`, 'warn');
+        break;
+      case 'DESTROYED':
+        log(`✔ ${ev.text ?? ''} — TRACK ${ev.tn} DESTROYED`, 'hl');
+        break;
+      case 'FRATRICIDE':
+        log(`✖✖ FRATRICIDE — ${ev.text ?? ''} (TRACK ${ev.tn})`, 'err');
+        break;
+      case 'LEAKER':
+        log(`⚠ ${ev.text ?? ''} (TRACK ${ev.tn})`, 'err');
+        break;
+      case 'RELOAD':
+        log(ev.text ?? 'RELOAD COMPLETE', 'warn');
+        break;
+      case 'ENGAGE_BLOCKED':
+        log(`ENGAGE DENIED — ${ev.text ?? ''} (TRACK ${ev.tn})`, 'warn');
+        break;
       default:
         break; // CONFIRMED/COASTING are visible in the table — too chatty for the log
     }
@@ -147,10 +177,66 @@ table.onIff = tn => {
 table.onDeclare = (tn, identity) => {
   world.declare(tn, identity);
 };
+table.onEngage = tn => {
+  world.engage(tn);
+};
+table.onAbort = tn => {
+  const n = world.weapons.abort(tn);
+  if (n) log(`✖ SELF-DESTRUCT — ${n} MISSILE${n > 1 ? 'S' : ''} DESTROYED (TRACK ${tn})`, 'warn');
+};
 
 document.getElementById('mission-name')!.textContent = MISSION.name;
 
-// ----- flight plans panel -----
+// ----- fire units strip -----
+
+const fsUnits = document.getElementById('fs-units')!;
+const fsChannels = document.getElementById('fs-channels')!;
+const fsRounds = document.getElementById('fs-rounds')!;
+const btnAuto = document.getElementById('btn-auto')!;
+const docSS = document.getElementById('doc-ss')!;
+const docSLS = document.getElementById('doc-sls')!;
+
+docSS.addEventListener('click', () => {
+  world.weapons.doctrine = 'SS';
+  docSS.classList.add('active');
+  docSLS.classList.remove('active');
+  log('FIRE DOCTRINE: SHOOT-SHOOT — RIPPLE 2');
+});
+docSLS.addEventListener('click', () => {
+  world.weapons.doctrine = 'SLS';
+  docSLS.classList.add('active');
+  docSS.classList.remove('active');
+  log('FIRE DOCTRINE: SHOOT-LOOK-SHOOT — SINGLE');
+});
+btnAuto.addEventListener('click', () => {
+  world.weapons.autoEngage = !world.weapons.autoEngage;
+  btnAuto.textContent = `AUTO: ${world.weapons.autoEngage ? 'ON' : 'OFF'}`;
+  btnAuto.classList.toggle('on', world.weapons.autoEngage);
+  log(
+    world.weapons.autoEngage
+      ? 'AUTO ENGAGE ENABLED — SYSTEM WILL FIRE PER WEAPONS STATUS'
+      : 'AUTO ENGAGE DISABLED — MANUAL ENGAGEMENT ONLY',
+    world.weapons.autoEngage ? 'warn' : '',
+  );
+});
+
+function renderFireStrip(): void {
+  const w = world.weapons;
+  fsUnits.innerHTML = w.units
+    .map(u => {
+      if (u.state === 'RELOADING') {
+        const left = Math.max(0, Math.ceil(u.reloadEndsT - world.time));
+        const mm = String(Math.floor(left / 60)).padStart(2, '0');
+        const ss = String(left % 60).padStart(2, '0');
+        return `<div class="fsu reloading">${u.name}<br><span class="pips">RELOAD ${mm}:${ss}</span></div>`;
+      }
+      const pips = '●'.repeat(u.rounds) + '○'.repeat(u.roundsMax - u.rounds);
+      return `<div class="fsu">${u.name}<br><span class="pips">${pips}</span> ${u.rounds}/${u.roundsMax}</div>`;
+    })
+    .join('');
+  fsChannels.textContent = `CH ${w.channelsUsed}/${w.channelsMax}`;
+  fsRounds.textContent = `${w.roundsReady()} RDY`;
+}
 
 const plansTbody = document.getElementById('plans-tbody')!;
 const plansClock = document.getElementById('plans-clock')!;
@@ -276,6 +362,10 @@ window.addEventListener('keydown', ev => {
     if (ppi.selectedTn !== null) world.declare(ppi.selectedTn, 'HOS');
   } else if (ev.key === 'f' || ev.key === 'F') {
     if (ppi.selectedTn !== null) world.declare(ppi.selectedTn, 'FND');
+  } else if (ev.key === 'e' || ev.key === 'E') {
+    if (ppi.selectedTn !== null) world.engage(ppi.selectedTn);
+  } else if (ev.key === 'x' || ev.key === 'X') {
+    if (ppi.selectedTn !== null) world.weapons.abort(ppi.selectedTn);
   } else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
     const tns = [...world.tracks.values()].sort((a, b) => a.tn - b.tn).map(t => t.tn);
     if (!tns.length) return;
@@ -370,7 +460,27 @@ const demoQueue: DemoStep[] = params.get('demo') === 'm3'
         if (tn !== null) { select(tn); world.declare(tn, 'HOS'); }
       } },
     ]
-  : [];
+  : params.get('demo') === 'm4'
+    ? [
+        { atT: 60, label: 'DECLARE BOMBER HOSTILE', run: () => {
+          const tn = findTrackBy((a, _s, id) => id === 'UNK' && a > 30000);
+          if (tn !== null) { select(tn); world.declare(tn, 'HOS'); }
+        } },
+        { atT: 66, label: 'ENGAGE BOMBER (SLS)', run: () => {
+          if (table.selectedTn !== null) world.engage(table.selectedTn);
+        } },
+        { atT: 200, label: 'DECLARE + ENGAGE FIRST DRONE', run: () => {
+          const tn = findTrackBy((a, s, id) => id === 'UNK' && a < 5000 && s < 130);
+          if (tn !== null) { select(tn); world.declare(tn, 'HOS'); world.engage(tn); }
+        } },
+        { atT: 250, label: 'ENABLE AUTO ENGAGE (weapons free — watch the civil)', run: () => {
+          world.weapons.autoEngage = true;
+          btnAuto.textContent = 'AUTO: ON';
+          btnAuto.classList.add('on');
+          log('DEMO ▸ AUTO ENGAGE ENABLED BY OPERATOR', 'warn');
+        } },
+      ]
+    : [];
 
 let demoIdx = 0;
 
@@ -399,6 +509,7 @@ setInterval(() => {
     zuluEl.textContent = `${fmtZulu(MISSION.startSeconds + world.time)}Z`;
     table.update(trk => ppi.brgRng(trk));
     renderFlightPlans();
+    renderFireStrip();
     if (radar.warming) refreshEmconUi();
   }
 }, 100);

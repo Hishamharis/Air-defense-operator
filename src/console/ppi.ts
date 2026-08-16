@@ -220,10 +220,16 @@ export class PPI {
     // truth overlay (dev / debrief camera)
     if (this.showTruth) this.drawTruth(ctx);
 
+    // interceptor missiles in flight + engagement lines
+    this.drawMissiles(ctx);
+
     // track symbology at last painted position
     for (const trk of this.world.tracks.values()) {
       this.drawSymbol(ctx, trk);
     }
+
+    // intercept flashes (expanding rings)
+    this.drawFlashes(ctx);
 
     // site marker
     ctx.strokeStyle = `rgba(${PAL.accent}, 0.8)`;
@@ -328,6 +334,57 @@ export class PPI {
       this.cy + Math.sin(center) * lr,
     );
     ctx.restore();
+  }
+
+  private drawMissiles(ctx: CanvasRenderingContext2D): void {
+    for (const m of this.world.weapons.missiles) {
+      if (m.dead) continue;
+      const [sx, sy] = this.toScreen(m.x, m.y);
+      const target = this.world.entityById(m.targetEntityId);
+      // engagement line to the target's last estimated position
+      const trk = target ? this.world.tracks.get(target.id) : undefined;
+      if (trk) {
+        const [tx, ty] = this.toScreen(trk.est.x, trk.est.y);
+        ctx.strokeStyle = 'rgba(143, 184, 216, 0.28)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 4]);
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(tx, ty);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      // missile marker: small bright triangle along velocity
+      const a = Math.atan2(m.vy, m.vx);
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(a);
+      ctx.fillStyle = 'rgba(180, 235, 180, 0.95)';
+      ctx.beginPath();
+      ctx.moveTo(5, 0);
+      ctx.lineTo(-4, 3);
+      ctx.lineTo(-4, -3);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  private drawFlashes(ctx: CanvasRenderingContext2D): void {
+    const now = this.world.time;
+    for (const f of this.world.flashes) {
+      const age = now - f.t;
+      if (age > 2.5) continue;
+      const [sx, sy] = this.toScreen(f.x, f.y);
+      const r = 6 + age * 22;
+      const alpha = Math.max(0, 0.8 - age * 0.32);
+      ctx.strokeStyle =
+        f.kind === 'FRAT' ? `rgba(200, 80, 75, ${alpha})` : `rgba(220, 240, 220, ${alpha})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
 
   private drawSymbol(ctx: CanvasRenderingContext2D, trk: Track): void {
