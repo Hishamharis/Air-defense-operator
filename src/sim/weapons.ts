@@ -53,6 +53,8 @@ export class WeaponsSystem {
   missiles: Missile[] = [];
   doctrine: Doctrine = 'SLS';
   autoEngage = false;
+  /** Master arm: all engagements (manual and auto) blocked while false. */
+  masterArmed = false;
   readonly channelsMax = 6;
   readonly reloadS = 480; // compressed ~8 min per launcher
 

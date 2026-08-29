@@ -118,7 +118,11 @@ export class TrackTable {
       trk.state !== 'PLOT' && e
         ? `EST PK ${pk.toFixed(2)}${pk < 0.5 ? ' — LOW ENERGY SOLUTION' : ''}`
         : '';
-    const engageBtn = `<button id="btn-engage" class="btn-engage">▶ ENGAGE (${this.world.weapons.doctrine})</button>`;
+    const armed = this.world.weapons.masterArmed;
+    const engageBtn = armed
+      ? `<button id="btn-engage" class="btn-engage">▶ ENGAGE (${this.world.weapons.doctrine})</button>`
+      : '<button id="btn-engage" class="btn-engage safe">⛔ MASTER SAFE — K TO ARM</button>';
+    const armHint = armed ? '' : 'WEAPONS SAFE — MASTER ARM REQUIRED TO ENGAGE';
     const abortBtn = activeMissiles
       ? `<button id="btn-abort" class="btn-abort">✖ ABORT (${activeMissiles})</button>`
       : '';
@@ -135,6 +139,7 @@ export class TrackTable {
       </div>
       <div class="dt-iff"><span class="dt-k" style="font-size:9px;letter-spacing:0.14em;color:var(--faint);display:block;margin:10px 0 3px;">IFF — MODE 4/C</span>${iffTxt}</div>
       ${pkTxt ? `<div style="margin-top:8px;font-size:11px;color:${pk < 0.5 ? 'var(--amber)' : '#8ab48a'};font-variant-numeric:tabular-nums;">${pkTxt}</div>` : ''}
+      ${armHint ? `<div class="arm-hint" style="margin-top:8px;font-size:10px;letter-spacing:0.12em;color:var(--amber);">${armHint}</div>` : ''}
       <div class="dt-actions">
         <button id="btn-iff">IFF INTERROGATE</button>
         <button id="btn-dec-hos" class="dec-hos">DECLARE HOS</button>

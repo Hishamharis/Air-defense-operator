@@ -259,6 +259,7 @@ export class World {
   /** The automation: engages per current WCS with no human in the loop. */
   private autoEngageTick(): void {
     if (!this.weapons.autoEngage) return;
+    if (!this.weapons.masterArmed) return; // AUTO only fires on an armed battery
     if (this.time - this.lastAutoT < 4) return;
     const wcs = this.director?.wcs ?? 'TIGHT';
     if (wcs === 'HOLD') return;
@@ -298,6 +299,12 @@ export class World {
     if (!trk || trk.state === 'PLOT') return false;
     const e = this.entityById(trk.entityId);
     if (!e) return false;
+
+    // master arm outranks the WCS — a safe battery cannot fire at all
+    if (!this.weapons.masterArmed) {
+      if (!auto) this.emit('ENGAGE_BLOCKED', trk, 'MASTER SAFE — ARM WEAPONS FIRST');
+      return false;
+    }
 
     const wcs = this.director?.wcs ?? 'TIGHT';
     if (wcs === 'HOLD') {

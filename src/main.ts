@@ -28,6 +28,7 @@ import {
 import { renderDebrief } from './console/debrief';
 import { ConsoleAudio } from './audio/audio';
 import { PPI } from './console/ppi';
+import { Tactical3D } from './console/tactical3d';
 import { TrackTable } from './console/trackTable';
 
 const DT = 1 / 50; // fixed sim timestep
@@ -110,7 +111,7 @@ function resolveCampaignWatch(idx: number): ResolvedWatch {
 // menu mode (no params): boot campaign watch silently, paused, behind the menu
 const scParam = params.get('sc');
 const campaignParam = params.has('campaign');
-const hasWatchParams = scParam !== null || campaignParam || params.has('demo');
+const hasWatchParams = scParam !== null || campaignParam || params.has('demo') || params.has('t');
 const watchParam = Number(params.get('watch'));
 const devAutostart = params.has('t');
 
@@ -127,20 +128,27 @@ else {
 
 // ----- app phase -----
 
-type Phase = 'menu' | 'briefing' | 'watch' | 'debrief';
+type Phase = 'menu' | 'briefing' | 'boot' | 'watch' | 'debrief';
 let phase: Phase = hasWatchParams ? (devAutostart ? 'watch' : 'briefing') : 'menu';
 let watchEnded = false;
 
 const overlay = document.getElementById('overlay')!;
+const fxAlarm = document.getElementById('fx-alarm')!;
+const fxBoot = document.getElementById('fx-boot')!;
+
+/** Wash the shelter red while hostiles are inside the inner ring. */
+function refreshAlarmLight(): void {
+  const hostileNear = [...world.tracks.values()].some(
+    t => t.identity === 'HOS' && Math.hypot(t.est.x, t.est.y) < 25000,
+  );
+  const leakerRecent = world.history.some(
+    ev => ev.kind === 'LEAKER' && world.time - (ev.t ?? 0) < 20,
+  );
+  fxAlarm.classList.toggle('on', hostileNear || leakerRecent);
+}
 
 // ----- logging -----
 
-interface LogLine {
-  t: number;
-  text: string;
-  cls: string;
-}
-const logs: LogLine[] = [];
 const wcsLog: { t: number; wcs: string }[] = [];
 
 function fmtZulu(seconds: number): string {
@@ -154,14 +162,12 @@ function fmtZulu(seconds: number): string {
 const logBody = document.getElementById('log-body')!;
 
 function log(text: string, cls = ''): void {
-  logs.push({ t: world.time, text, cls });
-  if (logs.length > 120) logs.shift();
-  logBody.innerHTML = logs
-    .map(
-      l =>
-        `<div class="log-line ${l.cls}"><span class="lt">${fmtZulu(W.startSeconds + l.t)}Z</span>${l.text}</div>`,
-    )
-    .join('');
+  const div = document.createElement('div');
+  div.className = `log-line ${cls}`;
+  div.innerHTML = `<span class="lt">${fmtZulu(W.startSeconds + world.time)}Z</span>${text}`;
+  if (cls === 'err') div.classList.add('flash-line');
+  logBody.appendChild(div);
+  while (logBody.children.length > 120) logBody.removeChild(logBody.firstChild!);
   logBody.scrollTop = logBody.scrollHeight;
 }
 
@@ -279,14 +285,17 @@ const world = new World(
 );
 
 const ppi = new PPI(document.getElementById('ppi') as HTMLCanvasElement, world, W.rangeKm * 1000);
+const tac3d = new Tactical3D(document.getElementById('tac3d') as HTMLCanvasElement, world, W.rangeKm);
 const table = new TrackTable(world);
 
 function select(tn: number | null): void {
   ppi.selectTn(tn);
+  tac3d.selectTn(tn);
   table.selectedTn = tn;
   table.update(trk => ppi.brgRng(trk));
 }
 ppi.onSelect = select;
+tac3d.onSelect = select;
 table.onSelect = select;
 table.onDrop = tn => {
   if (world.dropTrack(tn)) select(null);
@@ -358,6 +367,34 @@ function renderFireStrip(): void {
   fsChannels.textContent = `CH ${w.channelsUsed}/${w.channelsMax}`;
   fsRounds.textContent = `${w.roundsReady()} RDY`;
 }
+
+// ----- master arm -----
+
+const pillArm = document.getElementById('pill-arm')!;
+const btnArm = document.getElementById('btn-arm')!;
+
+function refreshArmUi(): void {
+  const on = world.weapons.masterArmed;
+  pillArm.textContent = on ? 'MASTER ARM' : 'MASTER SAFE';
+  pillArm.className = on ? 'pill armed' : 'pill';
+  btnArm.textContent = on ? '⏻ MASTER ARM' : '⏻ MASTER SAFE';
+  btnArm.classList.toggle('armed', on);
+}
+
+function setMasterArm(on: boolean): void {
+  world.weapons.masterArmed = on;
+  refreshArmUi();
+  audio.uiClick();
+  log(
+    on ? 'MASTER ARM — WEAPONS ARMED' : 'MASTER SAFE — WEAPONS SAFE',
+    on ? 'warn' : '',
+  );
+  // repaint the table so the detail panel engage button reflects armed state
+  table.update(trk => ppi.brgRng(trk));
+}
+
+btnArm.addEventListener('click', () => setMasterArm(!world.weapons.masterArmed));
+refreshArmUi();
 
 // ----- flight plans panel -----
 
@@ -469,6 +506,9 @@ window.addEventListener('keydown', ev => {
     if (ev.code === 'Space' && phase === 'briefing') {
       ev.preventDefault();
       beginWatch();
+    } else if (ev.code === 'Space' && phase === 'boot') {
+      ev.preventDefault();
+      finishBoot();
     }
     return;
   }
@@ -499,6 +539,8 @@ window.addEventListener('keydown', ev => {
       const n = world.weapons.abort(ppi.selectedTn);
       if (n) log(`✖ SELF-DESTRUCT — ${n} MISSILE${n > 1 ? 'S' : ''} DESTROYED (TRACK ${ppi.selectedTn})`, 'warn');
     }
+  } else if (ev.key === 'k' || ev.key === 'K') {
+    setMasterArm(!world.weapons.masterArmed);
   } else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
     const tns = [...world.tracks.values()].sort((a, b) => a.tn - b.tn).map(t => t.tn);
     if (!tns.length) return;
@@ -529,7 +571,7 @@ function showMenu(): void {
       <button class="mbtn mbtn-small" data-trial="m3">CORRIDOR WATCH 03 — identification</button>
       <button class="mbtn mbtn-small" data-trial="m2">NIGHT WATCH 02 — detection</button>
       <button class="mbtn mbtn-small" data-trial="m1">SCOPE TRIAL 01 — the scope</button>
-      <div class="menu-note">SPACE pause · arrows select · I interrogate · H/F declare · E engage · X abort · D drop · T truth</div>
+      <div class="menu-note">SPACE pause · arrows select · I interrogate · H/F declare · E engage · X abort · D drop · T truth · K arm</div>
     </div>`;
   overlay.querySelector('#m-new')?.addEventListener('click', () => {
     audio.unlock();
@@ -564,10 +606,39 @@ function showBriefing(): void {
   overlay.querySelector('#b-begin')?.addEventListener('click', beginWatch);
 }
 
-function beginWatch(): void {
-  audio.unlock();
-  audio.uiClick();
-  overlay.className = 'ov-hide';
+// ----- ECS boot sequence -----
+
+interface BootLine {
+  text: string;
+  cls: 'ok' | 'warn';
+}
+
+const BOOT_LINES: BootLine[] = [
+  { text: 'CENTRAL PROCESSOR ... OK', cls: 'ok' },
+  { text: 'RADAR X-BAND TRANSMITTER ... OK', cls: 'ok' },
+  { text: 'IFF INTERROGATOR MODE 4 ... KEYED', cls: 'ok' },
+  { text: 'PADIL DATALINK ... NET SYNC', cls: 'ok' },
+  { text: 'LAUNCHER 1-4 ... RESPONSE', cls: 'ok' },
+  { text: 'COOLANT LOOP ... NOMINAL', cls: 'ok' },
+  { text: 'BACKUP BUS DEGRADED — PRIMARY IN USE', cls: 'warn' },
+  { text: 'BIT COMPLETE — ECS READY', cls: 'ok' },
+  { text: 'HANDING CONTROL TO OPERATOR', cls: 'ok' },
+];
+
+const BOOT_TICK_MS = 260;
+const BOOT_DWELL_TICKS = 10; // ~2.6s hold after the last line before handover
+
+let bootTimer: ReturnType<typeof setInterval> | null = null;
+let bootFinished = false;
+
+function finishBoot(): void {
+  if (bootFinished || phase !== 'boot') return;
+  bootFinished = true;
+  if (bootTimer !== null) {
+    clearInterval(bootTimer);
+    bootTimer = null;
+  }
+  fxBoot.classList.add('ov-hide');
   phase = 'watch';
   setTimeScale(1);
   log('ECS POWER-UP — BIT IN PROGRESS');
@@ -578,6 +649,56 @@ function beginWatch(): void {
     log(`WX CELL BRG ${brg} RNG ${rng} KM — REDUCED DETECTION`, 'warn');
   }
   log('SYSTEM READY — MONITORING');
+}
+
+function runBootSequence(): void {
+  if (bootTimer !== null) {
+    clearInterval(bootTimer);
+    bootTimer = null;
+  }
+  bootFinished = false;
+  fxBoot.innerHTML = '';
+  const title = document.createElement('div');
+  title.className = 'boot-title';
+  title.textContent = 'SENTINEL ECS';
+  const lines = document.createElement('div');
+  lines.className = 'boot-lines';
+  const bar = document.createElement('div');
+  bar.className = 'boot-bar';
+  const fill = document.createElement('div');
+  fill.className = 'boot-bar-fill';
+  bar.appendChild(fill);
+  const skip = document.createElement('div');
+  skip.className = 'boot-skip';
+  skip.textContent = 'SPACE — SKIP';
+  fxBoot.append(title, lines, bar, skip);
+  fxBoot.classList.remove('ov-hide');
+
+  const totalTicks = BOOT_LINES.length + BOOT_DWELL_TICKS;
+  let step = 0;
+  bootTimer = setInterval(() => {
+    if (step < BOOT_LINES.length) {
+      const bl = BOOT_LINES[step];
+      const div = document.createElement('div');
+      div.className = bl.cls;
+      div.textContent = bl.text;
+      lines.appendChild(div);
+      audio.uiClick();
+      fill.style.width = `${Math.round(((step + 1) / totalTicks) * 100)}%`;
+    } else {
+      fill.style.width = `${Math.min(100, Math.round(((step + 1) / totalTicks) * 100))}%`;
+      if (step + 1 >= totalTicks) finishBoot();
+    }
+    step++;
+  }, BOOT_TICK_MS);
+}
+
+function beginWatch(): void {
+  audio.unlock();
+  audio.uiClick();
+  overlay.className = 'ov-hide';
+  phase = 'boot';
+  runBootSequence();
 }
 
 function enterDebrief(): void {
@@ -683,13 +804,16 @@ const demoQueue: DemoStep[] = params.get('demo') === 'm3'
           if (tn !== null) { select(tn); world.declare(tn, 'HOS'); }
         } },
         { atT: 66, label: 'ENGAGE BOMBER (SLS)', run: () => {
+          setMasterArm(true);
           if (table.selectedTn !== null) world.engage(table.selectedTn);
         } },
         { atT: 200, label: 'DECLARE + ENGAGE FIRST DRONE', run: () => {
+          setMasterArm(true);
           const tn = findTrackBy((a, s, id) => id === 'UNK' && a < 5000 && s < 130);
           if (tn !== null) { select(tn); world.declare(tn, 'HOS'); world.engage(tn); }
         } },
         { atT: 250, label: 'ENABLE AUTO ENGAGE (weapons free — watch the civil)', run: () => {
+          setMasterArm(true);
           world.weapons.autoEngage = true;
           btnAuto.textContent = 'AUTO: ON';
           btnAuto.classList.add('on');
@@ -699,18 +823,22 @@ const demoQueue: DemoStep[] = params.get('demo') === 'm3'
     : params.get('demo') === 'ds'
       ? [
           { atT: 135, label: 'DECLARE + ENGAGE FIRST SCUD', run: () => {
+            setMasterArm(true);
             const tn = findTrackBy((_a, s, id) => id !== 'FND' && s > 900);
             if (tn !== null) { select(tn); world.declare(tn, 'HOS'); world.engage(tn); }
           } },
           { atT: 175, label: 'DECLARE + ENGAGE SECOND SCUD', run: () => {
+            setMasterArm(true);
             const tn = findTrackBy((_a, s, id) => id !== 'FND' && s > 900);
             if (tn !== null) { select(tn); world.declare(tn, 'HOS'); world.engage(tn); }
           } },
           { atT: 225, label: 'DECLARE + ENGAGE THIRD SCUD', run: () => {
+            setMasterArm(true);
             const tn = findTrackBy((_a, s, id) => id !== 'FND' && s > 900);
             if (tn !== null) { select(tn); world.declare(tn, 'HOS'); world.engage(tn); }
           } },
           { atT: 268, label: 'DECLARE + ENGAGE FOURTH SCUD', run: () => {
+            setMasterArm(true);
             const tn = findTrackBy((_a, s, id) => id !== 'FND' && s > 900);
             if (tn !== null) { select(tn); world.declare(tn, 'HOS'); world.engage(tn); }
           } },
@@ -778,6 +906,7 @@ setInterval(() => {
     table.update(trk => ppi.brgRng(trk));
     renderFlightPlans();
     renderFireStrip();
+    refreshAlarmLight();
     // TBM alarm: announced once per track when the classifier catches hypersonic
     for (const trk of world.tracks.values()) {
       if (trk.autoClass === 'TBM' && !tbmAnnounced.has(trk.tn)) {
@@ -796,6 +925,7 @@ function renderLoop(now: number): void {
   lastRender = now;
   try {
     ppi.render(dtReal);
+    tac3d.render();
   } catch (err) {
     reportError('RENDER ERROR', err);
   }

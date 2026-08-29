@@ -10,15 +10,16 @@
     <div class="tb-left">
       <span class="brand">SENTINEL</span>
       <span class="sub">ENGAGEMENT CONTROL STATION</span>
-      <span class="mission" id="mission-name">SCOPE TRIAL 01</span>
+      <span class="mission" id="mission-name">—</span>
     </div>
     <div class="tb-center">
-      <span class="zulu" id="zulu">02:14:00Z</span>
+      <span class="zulu" id="zulu">--:--:--Z</span>
     </div>
     <div class="tb-right">
-      <span class="pill pill-amber">DEFCON 3</span>
+      <span class="pill pill-amber" id="pill-defcon">DEFCON 3</span>
       <span class="pill pill-blue" id="pill-wcs">WEAPONS TIGHT</span>
       <span class="pill pill-green" id="pill-emcon">EMCON RADIATE</span>
+      <span class="pill" id="pill-arm">MASTER SAFE</span>
       <span class="tctrl">
         <button id="btn-pause" title="Space">❚❚</button>
         <button id="btn-1x" title="1">1×</button>
@@ -44,6 +45,7 @@
             <button id="doc-ss" class="emc" title="Shoot-shoot: ripple 2">SS</button>
             <button id="doc-sls" class="emc active" title="Shoot-look-shoot: single, assess, re-fire">SLS</button>
             <button id="btn-auto" class="auto-btn">AUTO: OFF</button>
+            <button id="btn-arm" class="arm-btn" title="Master arm (K)">⏻ MASTER SAFE</button>
             <span class="fs-ch" id="fs-channels">CH 0/6</span>
             <span class="fs-rounds" id="fs-rounds"></span>
           </div>
@@ -52,32 +54,25 @@
     </section>
 
     <aside id="right-col">
+      <section class="panel" id="tactical-panel">
+        <div class="panel-head">
+          <span>TACTICAL — AIRSPACE 3D</span>
+          <span class="ph-right">DRAG ORBIT · WHEEL ZOOM</span>
+        </div>
+        <div class="panel-body tac-body">
+          <canvas id="tac3d"></canvas>
+          <div class="tac-alt-scale">
+            <span>50k</span><span>30k</span><span>10k</span><span>DECK</span>
+          </div>
+        </div>
+      </section>
+
       <section class="panel" id="emcon-panel">
         <div class="panel-head"><span>EMCON — RADAR CONTROL</span><span class="ph-right" id="emcon-status">SURVEILLANCE</span></div>
         <div class="panel-body emcon-body">
           <button id="emc-surv" class="emc active">SURVEILLANCE</button>
           <button id="emc-sector" class="emc">SECTOR</button>
           <button id="emc-silent" class="emc danger">SILENT</button>
-        </div>
-      </section>
-
-      <section class="panel" id="track-panel">
-        <div class="panel-head"><span>TRACK TABLE</span><span class="ph-right" id="track-count">0 TRK</span></div>
-        <div class="panel-body table-body">
-          <table id="track-table">
-            <thead>
-              <tr><th>TN</th><th>CLASS</th><th>ID</th><th>SPD</th><th>ALT</th><th>QUAL</th><th>RNG</th></tr>
-            </thead>
-            <tbody id="track-tbody"></tbody>
-          </table>
-          <div class="empty-hint" id="track-empty">NO TRACKS — SCOPE CLEAR</div>
-        </div>
-      </section>
-
-      <section class="panel" id="detail-panel">
-        <div class="panel-head"><span>SELECTED TRACK</span></div>
-        <div class="panel-body detail-body" id="detail-body">
-          <div class="empty-hint">NO TRACK SELECTED</div>
         </div>
       </section>
 
@@ -95,12 +90,39 @@
     </aside>
   </main>
 
-  <footer class="panel" id="log-panel">
-    <div class="panel-head"><span>SYSTEM LOG</span><span class="ph-right">LNCHR INTERFACE — M4</span></div>
-    <div class="panel-body log-body" id="log-body"></div>
-  </footer>
+  <section id="lower-row">
+    <section class="panel" id="track-panel">
+      <div class="panel-head"><span>TRACK TABLE</span><span class="ph-right" id="track-count">0 TRK</span></div>
+      <div class="panel-body table-body">
+        <table id="track-table">
+          <thead>
+            <tr><th>TN</th><th>CLASS</th><th>ID</th><th>SPD</th><th>ALT</th><th>QUAL</th><th>RNG</th></tr>
+          </thead>
+          <tbody id="track-tbody"></tbody>
+        </table>
+        <div class="empty-hint" id="track-empty">NO TRACKS — SCOPE CLEAR</div>
+      </div>
+    </section>
 
+    <section class="panel" id="detail-panel">
+      <div class="panel-head"><span>SELECTED TRACK</span><span class="ph-right" id="detail-ttn"></span></div>
+      <div class="panel-body detail-body" id="detail-body">
+        <div class="empty-hint">NO TRACK SELECTED</div>
+      </div>
+    </section>
+
+    <section class="panel" id="log-panel">
+      <div class="panel-head"><span>COMMS / SYSTEM LOG</span><span class="ph-right">VHF · PADIL · BIT</span></div>
+      <div class="panel-body log-body" id="log-body"></div>
+    </section>
+  </section>
+
+  <div id="fx-alarm"></div>
+  <div id="fx-grain"></div>
+  <div id="fx-vignette"></div>
+  <div id="fx-boot" class="ov-hide"></div>
   <div id="overlay" class="ov-hide"></div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
